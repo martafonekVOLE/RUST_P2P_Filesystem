@@ -1,7 +1,7 @@
 mod utils;
 mod cli;
 mod crypto;
-mod dht;
+mod core;
 mod network;
 mod sharding;
 mod storage;
