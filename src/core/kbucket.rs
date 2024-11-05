@@ -1,5 +1,3 @@
-// src/dht/kbucket.rs
-
 use super::key::Key;
 use std::collections::VecDeque;
 use std::net::SocketAddr;

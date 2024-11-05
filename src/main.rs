@@ -1,10 +1,10 @@
-mod utils;
 mod cli;
-mod crypto;
 mod core;
+mod crypto;
 mod network;
 mod sharding;
 mod storage;
+mod utils;
 
 fn main() {
     println!("Hello, world!");

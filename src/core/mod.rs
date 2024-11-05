@@ -1,5 +1,5 @@
-mod node;
-mod key;
-mod routing_table;
-mod kbucket;
 mod kademlia_dht;
+mod kbucket;
+mod key;
+mod node;
+mod routing_table;

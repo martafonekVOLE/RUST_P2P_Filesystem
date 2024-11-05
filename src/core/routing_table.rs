@@ -1,7 +1,5 @@
-// src/dht/routing_table.rs
-
-use super::key::Key;
 use super::kbucket::KBucket;
+use super::key::Key;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 

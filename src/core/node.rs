@@ -1,11 +1,9 @@
-// src/dht/node.rs
-
 use super::key::Key;
 use super::routing_table::RoutingTable;
+use crate::core::kademlia_dht::KademliaDHT;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use crate::core::kademlia_dht::KademliaDHT;
 
 pub struct Node {
     key: Key,
@@ -23,7 +21,16 @@ impl Node {
             key,
             address,
             routing_table: Arc::new(Mutex::new(RoutingTable::new(bucket_size, num_buckets))),
-            dht: Arc::new(Mutex::new(KademliaDHT::new(Arc::new(Mutex::new(Node::new(key, ip, port, bucket_size, num_buckets))), Arc::new(Mutex::new(RoutingTable::new(bucket_size, num_buckets)))))),
+            dht: Arc::new(Mutex::new(KademliaDHT::new(
+                Arc::new(Mutex::new(Node::new(
+                    key,
+                    ip,
+                    port,
+                    bucket_size,
+                    num_buckets,
+                ))),
+                Arc::new(Mutex::new(RoutingTable::new(bucket_size, num_buckets))),
+            ))),
             socket,
         }
     }
@@ -60,7 +67,9 @@ impl Node {
     }
 
     pub fn send_message(&self, target: &SocketAddr, message: &str) {
-        self.socket.send_to(message.as_bytes(), target).expect("Failed to send message");
+        self.socket
+            .send_to(message.as_bytes(), target)
+            .expect("Failed to send message");
     }
 
     pub fn receive_message(&self, message: &str) {
