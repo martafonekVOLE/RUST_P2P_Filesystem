@@ -1,16 +1,14 @@
-use super::key::Key;
-use super::routing_table::RoutingTable;
-use crate::core::kademlia_dht::KademliaDHT;
+use crate::core::key::Key;
+use crate::routing::routing_table::RoutingTable;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub struct Node {
     key: Key,
     address: SocketAddr,
-    routing_table: Arc<Mutex<RoutingTable>>,
-    dht: Arc<Mutex<KademliaDHT>>,
     socket: UdpSocket,
+    routing_table: Arc<RwLock<RoutingTable>>,
 }
 
 impl Node {
@@ -20,50 +18,19 @@ impl Node {
         Node {
             key,
             address,
-            routing_table: Arc::new(Mutex::new(RoutingTable::new(bucket_size, num_buckets))),
-            dht: Arc::new(Mutex::new(KademliaDHT::new(
-                Arc::new(Mutex::new(Node::new(
-                    key,
-                    ip,
-                    port,
-                    bucket_size,
-                    num_buckets,
-                ))),
-                Arc::new(Mutex::new(RoutingTable::new(bucket_size, num_buckets))),
-            ))),
+            routing_table: Arc::new(RwLock::new(RoutingTable::new(bucket_size, num_buckets))),
             socket,
         }
     }
 
-    pub fn start(&self) {
-        let socket = self.socket.try_clone().expect("Failed to clone socket");
-        let routing_table = Arc::clone(&self.routing_table);
-        let dht = Arc::clone(&self.dht);
-        thread::spawn(move || {
-            let mut buf = [0; 1024];
-            loop {
-                match socket.recv_from(&mut buf) {
-                    Ok((size, src)) => {
-                        let message = String::from_utf8_lossy(&buf[..size]);
-                        println!("Received message from {}: {}", src, message);
-                        // Handle the message (placeholder)
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to receive message: {}", e);
-                    }
-                }
-            }
-        });
+    pub async fn add_node(&self, key: Key, addr: SocketAddr) {
+        let mut rt = self.routing_table.write().await;
+        rt.add_node(key, addr).await;
     }
 
-    pub fn add_node(&self, key: Key, addr: SocketAddr) {
-        let mut rt = self.routing_table.lock().unwrap();
-        rt.add_node(key, addr);
-    }
-
-    pub fn find_node(&self, key: &Key) -> Option<(Key, SocketAddr)> {
-        let rt = self.routing_table.lock().unwrap();
-        rt.find_node(key)
+    pub async fn find_node(&self, key: &Key) -> Option<(Key, SocketAddr)> {
+        let mut rt = self.routing_table.read().await;
+        rt.find_node(key).await
     }
 
     pub fn send_message(&self, target: &SocketAddr, message: &str) {
@@ -75,5 +42,9 @@ impl Node {
     pub fn receive_message(&self, message: &str) {
         println!("Received message: {}", message);
         // Handle the message (placeholder)
+    }
+
+    pub fn join_network_procedure() {
+        // Placeholder for the join network procedure
     }
 }

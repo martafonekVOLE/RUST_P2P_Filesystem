@@ -1,4 +1,5 @@
-use super::key::Key;
+use crate::config::K;
+use crate::core::key::Key;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 
@@ -9,10 +10,10 @@ pub struct KBucket {
 }
 
 impl KBucket {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new() -> Self {
         KBucket {
-            nodes: VecDeque::with_capacity(capacity),
-            capacity,
+            nodes: VecDeque::with_capacity(K),
+            capacity: K,
         }
     }
 

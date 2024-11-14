@@ -1,37 +1,40 @@
+use crate::config::KEY_LENGTH;
 use rand::Rng;
+use sha1::{Digest, Sha1};
 use std::cmp::Ordering;
 use std::fmt;
 
+type KeyValue = [u8; KEY_LENGTH];
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct Key {
-    pub(crate) value: [u8; 20], // Assuming a 160-bit key for Kademlia
+    pub(crate) value: KeyValue, // Assuming a 160-bit key for Kademlia
 }
 
 impl Key {
     /// Generate a new random key
     pub fn new_random() -> Self {
         let mut rng = rand::thread_rng();
-        let mut value = [0u8; 20];
+        let mut value: KeyValue = [0u8; KEY_LENGTH];
         rng.fill(&mut value);
         Key { value }
     }
 
     /// Calculate a key from a given input (e.g., a GUID)
     pub fn from_input(input: &[u8]) -> Self {
-        use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
         hasher.update(input);
         let result = hasher.finalize();
-        let mut value = [0u8; 20];
-        value.copy_from_slice(&result[..20]);
+        let mut value: KeyValue = [0u8; KEY_LENGTH];
+        value.copy_from_slice(&result[..KEY_LENGTH]);
         Key { value }
     }
 
     /// Compare two keys using XOR
-    pub fn distance(&self, other: &Key) -> [u8; 20] {
-        let mut distance = [0u8; 20];
-        for i in 0..20 {
-            distance[i] = self.value[i] ^ other.value[i];
+    pub fn distance(&self, other: &Key) -> KeyValue {
+        let mut distance: KeyValue = [0u8; KEY_LENGTH];
+        for (i, dist) in distance.iter_mut().enumerate().take(KEY_LENGTH) {
+            *dist = self.value[i] ^ other.value[i];
         }
         distance
     }

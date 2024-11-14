@@ -1,7 +1,8 @@
 mod cli;
+mod config;
 mod core;
-mod crypto;
-mod network;
+mod networking;
+mod routing;
 mod sharding;
 mod storage;
 mod utils;
