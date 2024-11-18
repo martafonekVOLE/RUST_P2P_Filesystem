@@ -1,5 +1,9 @@
 use crate::core::key::Key;
+use crate::routing::kademlia_messages;
+use crate::routing::kademlia_messages::KademliaMessageType;
 use crate::routing::routing_table::RoutingTable;
+use sha1::Digest;
+use std::borrow::Cow;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -24,12 +28,12 @@ impl Node {
     }
 
     pub async fn add_node(&self, key: Key, addr: SocketAddr) {
-        let mut rt = self.routing_table.write().await;
+        let rt = self.routing_table.write().await;
         rt.add_node(key, addr).await;
     }
 
     pub async fn find_node(&self, key: &Key) -> Option<(Key, SocketAddr)> {
-        let mut rt = self.routing_table.read().await;
+        let rt = self.routing_table.read().await;
         rt.find_node(key).await
     }
 
@@ -39,12 +43,35 @@ impl Node {
             .expect("Failed to send message");
     }
 
-    pub fn receive_message(&self, message: &str) {
-        println!("Received message: {}", message);
-        // Handle the message (placeholder)
+    pub fn receive_message(&self, message: Cow<str>) {
+        let _parsed_message = kademlia_messages::parse_kademlia_message(message);
     }
 
-    pub fn join_network_procedure() {
-        // Placeholder for the join network procedure
+    pub async fn join_network_procedure(&self, bootstrap_nodes: Vec<(Key, SocketAddr)>) {
+        for (key, addr) in bootstrap_nodes {
+            let message = kademlia_messages::build_kademlia_message(
+                KademliaMessageType::FindNode,
+                self.key.clone().to_string(),
+                key.to_string(),
+            );
+
+            self.send_message(&addr, &message);
+        }
+    }
+
+    pub async fn listen_for_messages(&self) {
+        let mut buffer = [0; 1024];
+
+        loop {
+            match self.socket.recv_from(&mut buffer) {
+                Ok((size, _src)) => {
+                    let message = String::from_utf8_lossy(&buffer[..size]);
+                    self.receive_message(message);
+                }
+                Err(e) => {
+                    println!("Error while receiving from socket: {}", e);
+                }
+            }
+        }
     }
 }
