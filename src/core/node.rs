@@ -1,6 +1,8 @@
 use crate::core::key::Key;
+use crate::networking::node_info::NodeInfo;
+use crate::networking::node_service::{handle_received_request, send_message};
 use crate::routing::kademlia_messages;
-use crate::routing::kademlia_messages::KademliaMessageType;
+use crate::routing::kademlia_messages::{KademliaMessage, KademliaMessageType};
 use crate::routing::routing_table::RoutingTable;
 use sha1::Digest;
 use std::borrow::Cow;
@@ -37,26 +39,32 @@ impl Node {
         rt.find_node(key).await
     }
 
-    pub fn send_message(&self, target: &SocketAddr, message: &str) {
-        self.socket
-            .send_to(message.as_bytes(), target)
-            .expect("Failed to send message");
-    }
-
     pub fn receive_message(&self, message: Cow<str>) {
-        let _parsed_message = kademlia_messages::parse_kademlia_message(message);
+        let parsed_message = kademlia_messages::parse_kademlia_message(message);
+
+        let routing_table = self.routing_table.clone();
+
+        // spawn thread to handle
+        tokio::spawn(async move {
+            handle_received_request(parsed_message, routing_table).await;
+        });
     }
 
-    pub async fn join_network_procedure(&self, bootstrap_nodes: Vec<(Key, SocketAddr)>) {
-        for (key, addr) in bootstrap_nodes {
-            let message = kademlia_messages::build_kademlia_message(
-                KademliaMessageType::FindNode,
-                self.key.clone().to_string(),
-                key.to_string(),
-            );
+    pub async fn join_network_procedure(&self, bootstrap_node: SocketAddr) {
 
-            self.send_message(&addr, &message);
-        }
+        // 1. Cpy bootstrap nodes' routing table - maybe not necessary as step 2. does this?
+        // 2. Query itself against the bootstrap node (FIND_NODE), update RT
+        // 3. Iteratively query itself against nodes from 2. and onwards until stable state of routing table (nothing changes anymore)
+
+        //let message = KademliaMessage::new(
+        //                 KademliaMessageType::FindNode {
+        //                     node_id: self.key.clone(),
+        //                 },
+        //                 NodeInfo::new(self.key.clone(), None),
+        //                 NodeInfo::new(key.clone(), Some(addr.clone())),
+        //             );
+        //
+        //             send_message(message).await;
     }
 
     pub async fn listen_for_messages(&self) {
