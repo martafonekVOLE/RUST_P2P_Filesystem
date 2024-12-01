@@ -1,8 +1,6 @@
 use crate::core::key::Key;
-use crate::networking::node_info::NodeInfo;
-use crate::networking::node_service::{handle_received_request, send_message};
+use crate::networking::node_service::handle_received_request;
 use crate::routing::kademlia_messages;
-use crate::routing::kademlia_messages::{KademliaMessage, KademliaMessageType};
 use crate::routing::routing_table::RoutingTable;
 use sha1::Digest;
 use std::borrow::Cow;

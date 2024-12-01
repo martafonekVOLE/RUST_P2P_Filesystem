@@ -16,7 +16,7 @@ impl MessageSender {
     pub async fn send_ping(&self, message: KademliaMessage, target: SocketAddr) {
         let msg_type = message.get_type();
         self.socket
-            .send_to(&*msg_type.to_bytes(), target)
+            .send_to(&msg_type.to_bytes(), target)
             .await
             .expect("Failed to send Ping");
     }

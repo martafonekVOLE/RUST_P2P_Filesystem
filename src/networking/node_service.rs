@@ -1,4 +1,3 @@
-use crate::networking::message_sender::MessageSender;
 use crate::routing::kademlia_messages::{KademliaMessage, KademliaMessageType};
 use crate::routing::routing_table::RoutingTable;
 use std::sync::Arc;

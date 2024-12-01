@@ -1,7 +1,6 @@
 use crate::core::key::Key;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::process::exit;
 
 #[derive(Serialize, Deserialize)]
 pub struct NodeInfo {

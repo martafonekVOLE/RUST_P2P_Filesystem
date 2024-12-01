@@ -1,11 +1,9 @@
 use crate::config::K;
 use crate::core::key::Key;
-use crate::networking::node_info;
 use crate::networking::node_info::NodeInfo;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::process::exit;
-use std::sync::mpsc::Receiver;
 
 #[derive(Serialize, Deserialize)]
 pub enum KademliaMessageType {
