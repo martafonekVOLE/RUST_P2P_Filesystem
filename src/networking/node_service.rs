@@ -1,9 +1,16 @@
+use std::process::exit;
 use crate::routing::kademlia_messages::{KademliaMessage, KademliaMessageType};
+use crate::core::node;
 use crate::routing::routing_table::RoutingTable;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use crate::core::node::Node;
+use crate::networking::message_sender;
+use crate::networking::message_sender::MessageSender;
+use crate::networking::node_info::NodeInfo;
 
 pub async fn handle_received_request(
+    node: &Node,
     message: KademliaMessage,
     routing_table: Arc<RwLock<RoutingTable>>,
 ) {
@@ -11,13 +18,13 @@ pub async fn handle_received_request(
 
     match *kademlia_message_type {
         KademliaMessageType::Ping => {
-            handle_ping_message(message);
+            handle_ping_message(node, message).await;
         }
         KademliaMessageType::FindNode { .. } => {
             handle_find_node_message(message, routing_table);
         }
         KademliaMessageType::Pong => {
-            handle_pong_message(message);
+            handle_pong_message(node, message);
         }
         KademliaMessageType::Nodes { .. } => {
             handle_nodes_message(message);
@@ -25,12 +32,23 @@ pub async fn handle_received_request(
     }
 }
 
-fn handle_ping_message(message: KademliaMessage) {
-    // send pong
+async fn handle_ping_message(node: &Node, original_message: KademliaMessage) {
+    let original_receiver = original_message.get_receiver();
+    let original_sender = original_message.get_sender();
+
+    let original_receiver_address = original_receiver.get_address_unwrapped();
+
+    // Modify Node's recent activity -> add node to KBuckets
+    add_recent_activity(node, original_sender);
+
+    // Send PONG response
+    let message_sender = MessageSender::new(original_receiver_address.to_string().as_str());
+    message_sender.send_pong(original_sender).await;
 }
 
-fn handle_pong_message(message: KademliaMessage) {
-    // send pong
+fn handle_pong_message(node: &Node, message: KademliaMessage) {
+    let sender = message.get_sender();
+    add_recent_activity(node, sender);
 }
 
 fn handle_find_node_message(message: KademliaMessage, routing_table: Arc<RwLock<RoutingTable>>) {
@@ -47,6 +65,8 @@ fn handle_find_node_message(message: KademliaMessage, routing_table: Arc<RwLock<
 
 fn handle_nodes_message(message: KademliaMessage) {}
 
-pub async fn send_message(message: KademliaMessage) {
-    // handle send message
+fn add_recent_activity(node: &Node, contact_node: &NodeInfo) {
+
+    // TODO:
+
 }

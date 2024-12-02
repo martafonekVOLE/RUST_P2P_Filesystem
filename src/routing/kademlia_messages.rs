@@ -3,6 +3,7 @@ use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::net::SocketAddr;
 use std::process::exit;
 
 #[derive(Serialize, Deserialize)]
@@ -59,6 +60,14 @@ impl KademliaMessage {
 
     pub fn get_type(&self) -> &KademliaMessageType {
         &self.msg_type
+    }
+
+    pub fn get_sender(&self) -> &NodeInfo {
+        &self.sender
+    }
+
+    pub fn get_receiver(&self) -> &NodeInfo {
+        &self.receiver
     }
 }
 

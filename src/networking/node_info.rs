@@ -1,6 +1,7 @@
 use crate::core::key::Key;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::process::exit;
 
 #[derive(Serialize, Deserialize)]
 pub struct NodeInfo {
@@ -15,6 +16,18 @@ impl NodeInfo {
 
     pub fn get_address(&self) -> Option<SocketAddr> {
         self.address
+    }
+
+    pub fn get_address_unwrapped(&self) -> SocketAddr {
+        let response = match self.address.clone() {
+            Some(address) => address,
+            None => {
+                eprintln!("Error: Invalid ping sender!");
+                exit(1);
+            }
+        };
+
+        response
     }
 
     pub fn get_id(&self) -> Key {
