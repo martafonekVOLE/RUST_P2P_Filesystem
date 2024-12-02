@@ -6,28 +6,16 @@ use std::process::exit;
 #[derive(Serialize, Deserialize)]
 pub struct NodeInfo {
     pub id: Key,
-    pub address: Option<SocketAddr>,
+    pub address: SocketAddr,
 }
 
 impl NodeInfo {
-    pub fn new(id: Key, address: Option<SocketAddr>) -> Self {
+    pub fn new(id: Key, address: SocketAddr) -> Self {
         NodeInfo { id, address }
     }
 
-    pub fn get_address(&self) -> Option<SocketAddr> {
-        self.address
-    }
-
-    pub fn get_address_unwrapped(&self) -> SocketAddr {
-        let response = match self.address.clone() {
-            Some(address) => address,
-            None => {
-                eprintln!("Error: Invalid ping sender!");
-                exit(1);
-            }
-        };
-
-        response
+    pub fn get_address(&self) -> &SocketAddr {
+        &self.address
     }
 
     pub fn get_id(&self) -> Key {
@@ -38,13 +26,7 @@ impl NodeInfo {
         let mut bytes = Vec::new();
 
         bytes.extend(self.id.to_bytes());
-
-        if let Some(addr) = &self.address {
-            // Assuming SocketAddr can be serialized directly to bytes
-            bytes.extend(addr.to_string().as_bytes());
-        } else {
-            bytes.extend(&[0u8]);
-        }
+        bytes.extend(self.address.to_string().as_bytes());
 
         bytes
     }

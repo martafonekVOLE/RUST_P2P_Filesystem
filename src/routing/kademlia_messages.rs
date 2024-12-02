@@ -43,13 +43,17 @@ impl KademliaMessageType {
 #[derive(Serialize, Deserialize)]
 pub struct KademliaMessage {
     msg_type: KademliaMessageType,
-    sender: NodeInfo,
+    sender: Option<NodeInfo>,
     receiver: NodeInfo,
     magic_cookie: String,
 }
 
 impl KademliaMessage {
-    pub fn new(msg_type: KademliaMessageType, sender: NodeInfo, receiver: NodeInfo) -> Self {
+    pub fn new(
+        msg_type: KademliaMessageType,
+        sender: Option<NodeInfo>,
+        receiver: NodeInfo,
+    ) -> Self {
         KademliaMessage {
             msg_type,
             sender,
@@ -62,7 +66,7 @@ impl KademliaMessage {
         &self.msg_type
     }
 
-    pub fn get_sender(&self) -> &NodeInfo {
+    pub fn get_sender(&self) -> &Option<NodeInfo> {
         &self.sender
     }
 
@@ -71,7 +75,9 @@ impl KademliaMessage {
     }
 }
 
-pub fn parse_kademlia_message(message: Cow<str>) -> KademliaMessage {
+pub fn parse_kademlia_message(message: Cow<str>, sender: SocketAddr) -> KademliaMessage {
+    //Rework this based on received message
+
     let msg = serde_json::from_str(&message);
     let parsed_message: KademliaMessage = match msg {
         Ok(msg) => msg,

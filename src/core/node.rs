@@ -37,9 +37,8 @@ impl Node {
         rt.find_node(key).await
     }
 
-    pub fn receive_message(&self, message: Cow<str>) {
-        let parsed_message = kademlia_messages::parse_kademlia_message(message);
-
+    pub fn receive_message(&self, message: Cow<str>, sender: SocketAddr) {
+        let parsed_message = kademlia_messages::parse_kademlia_message(message, sender);
         let routing_table = self.routing_table.clone();
 
         // spawn thread to handle
@@ -70,9 +69,9 @@ impl Node {
 
         loop {
             match self.socket.recv_from(&mut buffer) {
-                Ok((size, _src)) => {
+                Ok((size, src)) => {
                     let message = String::from_utf8_lossy(&buffer[..size]);
-                    self.receive_message(message);
+                    self.receive_message(message, src);
                 }
                 Err(e) => {
                     println!("Error while receiving from socket: {}", e);

@@ -12,7 +12,9 @@ pub struct MessageSender {
 
 impl MessageSender {
     pub async fn new(address: &str) -> Self {
-        let socket = UdpSocket::bind(address).await.expect("Building MessageSender failed!");
+        let socket = UdpSocket::bind(address)
+            .await
+            .expect("Building MessageSender failed!");
 
         MessageSender { socket }
     }
@@ -24,7 +26,7 @@ impl MessageSender {
     ) -> Result<usize, Error> {
         let response = self
             .socket
-            .send_to(&message_type.to_bytes(), receiver.get_address_unwrapped())
+            .send_to(&message_type.to_bytes(), receiver.get_address())
             .await;
 
         response
@@ -35,7 +37,7 @@ impl MessageSender {
             .await
             .expect(&format!(
                 "Sending PING message to {} failed.",
-                receiver.get_address_unwrapped()
+                receiver.get_address()
             ));
     }
 
@@ -44,7 +46,7 @@ impl MessageSender {
             .await
             .expect(&format!(
                 "Sending PONG message to {} failed.",
-                receiver.get_address_unwrapped()
+                receiver.get_address()
             ));
     }
 }
