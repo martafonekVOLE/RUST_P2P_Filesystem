@@ -1,13 +1,13 @@
-use std::process::exit;
-use crate::routing::kademlia_messages::{KademliaMessage, KademliaMessageType};
 use crate::core::node;
-use crate::routing::routing_table::RoutingTable;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use crate::core::node::Node;
 use crate::networking::message_sender;
 use crate::networking::message_sender::MessageSender;
 use crate::networking::node_info::NodeInfo;
+use crate::routing::kademlia_messages::{KademliaMessage, KademliaMessageType};
+use crate::routing::routing_table::RoutingTable;
+use std::process::exit;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub async fn handle_received_request(
     node: &Node,
@@ -68,5 +68,4 @@ fn handle_nodes_message(message: KademliaMessage) {}
 fn add_recent_activity(node: &Node, contact_node: &NodeInfo) {
 
     // TODO:
-
 }
