@@ -1,6 +1,7 @@
 use crate::networking::node_info::NodeInfo;
 use crate::routing::kademlia_messages::{KademliaMessage, KademliaMessageType};
 use std::fmt::format;
+use std::io::Error;
 use std::net::SocketAddr;
 use std::sync::mpsc::Sender;
 use tokio::net::UdpSocket;
@@ -10,8 +11,8 @@ pub struct MessageSender {
 }
 
 impl MessageSender {
-    pub fn new(address: &str) -> Self {
-        let socket = UdpSocket::bind(address).expect("failed");
+    pub async fn new(address: &str) -> Self {
+        let socket = UdpSocket::bind(address).await.expect("Building MessageSender failed!");
 
         MessageSender { socket }
     }
@@ -20,7 +21,7 @@ impl MessageSender {
         &self,
         message_type: KademliaMessageType,
         receiver: &NodeInfo,
-    ) -> Result<usize, Err()> {
+    ) -> Result<usize, Error> {
         let response = self
             .socket
             .send_to(&message_type.to_bytes(), receiver.get_address_unwrapped())

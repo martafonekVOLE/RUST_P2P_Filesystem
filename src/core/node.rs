@@ -44,7 +44,7 @@ impl Node {
 
         // spawn thread to handle
         tokio::spawn(async move {
-            handle_received_request(self, parsed_message, routing_table).await;
+            handle_received_request(parsed_message, routing_table).await;
         });
     }
 
