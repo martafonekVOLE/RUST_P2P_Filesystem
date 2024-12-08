@@ -2,7 +2,7 @@ use crate::core::key::Key;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct NodeInfo {
     pub id: Key,
     pub address: SocketAddr,
