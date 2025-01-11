@@ -1,55 +1,42 @@
 use super::kbucket::KBucket;
+use crate::config::K;
 use crate::core::key::Key;
-use std::net::SocketAddr;
+use crate::networking::node_info::NodeInfo;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub struct RoutingTable {
+    id: Key,
     buckets: Vec<Arc<RwLock<KBucket>>>,
     bucket_size: usize,
 }
 
 impl RoutingTable {
-    pub fn new(bucket_size: usize, num_buckets: usize) -> Self {
-        let mut buckets = Vec::with_capacity(num_buckets);
-        for _ in 0..num_buckets {
-            buckets.push(Arc::new(RwLock::new(KBucket::new())));
-        }
+    // TODO should this be 160?
+    pub const NUM_BUCKETS: usize = 160;
+    
+    pub fn new(id: Key) -> Self {
+        let buckets = (0..Self::NUM_BUCKETS)
+            .map(|_| Arc::new(RwLock::new(KBucket::new())))
+            .collect();
         RoutingTable {
+            id,
             buckets,
-            bucket_size,
+            bucket_size: K,
         }
     }
 
-    fn get_bucket_index(&self, key: &Key) -> usize {
-        // Simplified bucket index calculation
-        key.value[0] as usize % self.buckets.len()
-    }
-
-    pub async fn add_node(&self, key: Key, addr: SocketAddr) -> bool {
-        let index = self.get_bucket_index(&key);
-        let mut bucket = self.buckets[index].write().await;
-        bucket.add_node(key, addr)
-    }
-
-    pub async fn remove_node(&self, key: &Key) -> bool {
-        let index = self.get_bucket_index(key);
-        let mut bucket = self.buckets[index].write().await;
-        bucket.remove_node(key)
-    }
-
-    pub async fn find_node(&self, key: &Key) -> Option<(Key, SocketAddr)> {
-        let index = self.get_bucket_index(key);
-        let bucket = self.buckets[index].read().await;
-        bucket.find_node(key).cloned()
-    }
-
-    pub async fn get_all_nodes(&self) -> Vec<(Key, SocketAddr)> {
-        let mut all_nodes = Vec::new();
-        for bucket in &self.buckets {
-            let bucket = bucket.read().await;
-            all_nodes.extend(bucket.get_nodes().iter().cloned());
+    pub async fn store_nodeinfo(&self, node_info: NodeInfo) -> bool {
+        let bucket_index = self.id.leading_zeros(&node_info.get_id()) as usize;
+        if let Some(bucket) = self.buckets.get(bucket_index) {
+            let mut bucket = bucket.write().await;
+            bucket.add_node(node_info)
+        } else {
+            false
         }
-        all_nodes
+    }
+
+    pub fn get_buckets(&self) -> Vec<Arc<RwLock<KBucket>>> {
+        self.buckets.clone()
     }
 }
