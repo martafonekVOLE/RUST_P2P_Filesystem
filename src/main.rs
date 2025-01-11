@@ -1,10 +1,11 @@
-mod utils;
 mod cli;
-mod crypto;
-mod dht;
-mod network;
+mod config;
+mod core;
+mod networking;
+mod routing;
 mod sharding;
 mod storage;
+mod utils;
 
 use clap::{Command, Arg};
 use std::error::Error;
