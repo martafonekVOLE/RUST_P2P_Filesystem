@@ -38,6 +38,13 @@ impl KademliaMessageType {
             }
         }
     }
+
+    pub fn is_response(&self) -> bool {
+        match &self {
+            KademliaMessageType::Pong => true,
+            _ => false
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]

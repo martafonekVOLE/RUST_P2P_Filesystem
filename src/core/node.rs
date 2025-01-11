@@ -6,6 +6,7 @@ use sha1::Digest;
 use std::borrow::Cow;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 pub struct Node {
@@ -13,6 +14,7 @@ pub struct Node {
     address: SocketAddr,
     socket: UdpSocket,
     routing_table: Arc<RwLock<RoutingTable>>,
+    request_map: Arc<RwLock<HashMap<RequestId, oneshot::Sender<Message>>>>
 }
 
 impl Node {
@@ -37,16 +39,6 @@ impl Node {
         rt.find_node(key).await
     }
 
-    pub fn receive_message(&self, message: Cow<str>, sender: SocketAddr) {
-        let parsed_message = kademlia_messages::parse_kademlia_message(message, sender);
-        let routing_table = self.routing_table.clone();
-
-        // spawn thread to handle
-        tokio::spawn(async move {
-            handle_received_request(parsed_message, routing_table).await;
-        });
-    }
-
     pub async fn join_network_procedure(&self, bootstrap_node: SocketAddr) {
 
         // 1. Cpy bootstrap nodes' routing table - maybe not necessary as step 2. does this?
@@ -64,6 +56,9 @@ impl Node {
         //             send_message(message).await;
     }
 
+    ///
+    /// This method does listen for incoming messages.
+    ///
     pub async fn listen_for_messages(&self) {
         let mut buffer = [0; 1024];
 
@@ -78,5 +73,28 @@ impl Node {
                 }
             }
         }
+    }
+
+
+    ///
+    /// This method does determine what to do with received data.
+    /// If this receives a request, it will dispatch a new thread to handle it.
+    /// If this receives a response, it will pass it to a channel where a process
+    /// should be waiting for it.
+    ///
+    pub fn receive_message(&self, message: Cow<str>, sender: SocketAddr) {
+        let routing_table = self.routing_table.clone();
+        let parsed_message = kademlia_messages::parse_kademlia_message(message, sender);
+
+        // Handle response
+        if parsed_message.get_type().is_response() {
+            // todo response
+            return;
+        }
+
+        // Handle request
+        tokio::spawn(async move {
+            handle_received_request(parsed_message, routing_table).await;
+        });
     }
 }
