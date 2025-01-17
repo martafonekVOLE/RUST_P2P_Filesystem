@@ -1,4 +1,6 @@
-mod message_sender;
+pub(crate) mod incoming_request_handler;
+pub(crate) mod message_dispatcher;
+pub(crate) mod messages;
 pub(crate) mod node_info;
-pub(crate) mod node_service;
-mod request_map;
+mod outgoing_request_handler;
+pub(crate) mod request_map;

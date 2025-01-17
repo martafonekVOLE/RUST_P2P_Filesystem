@@ -1,100 +1,93 @@
 use crate::core::key::Key;
-use crate::networking::node_service::handle_received_request;
-use crate::routing::kademlia_messages;
+use crate::networking::incoming_request_handler::handle_received_request;
+use crate::networking::message_dispatcher::MessageDispatcher;
+use crate::networking::messages::{Request, Response};
+use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
-use sha1::Digest;
-use std::borrow::Cow;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::SocketAddr;
 use std::sync::Arc;
-use std::collections::HashMap;
+use tokio::net::UdpSocket as TokioUdpSocket;
 use tokio::sync::RwLock;
+use tokio::task;
 
 pub struct Node {
     key: Key,
     address: SocketAddr,
-    socket: UdpSocket,
+    socket: Arc<TokioUdpSocket>, // Use Tokio's UdpSocket for async I/O
     routing_table: Arc<RwLock<RoutingTable>>,
-    request_map: Arc<RwLock<HashMap<RequestId, oneshot::Sender<Message>>>>
+    request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
+    message_dispatcher: Arc<MessageDispatcher>,
 }
 
 impl Node {
-    pub fn new(key: Key, ip: String, port: u16, bucket_size: usize, num_buckets: usize) -> Self {
+    pub async fn new(
+        key: Key,
+        ip: String,
+        port: u16,
+        bucket_size: usize,
+        num_buckets: usize,
+    ) -> Self {
         let address = format!("{}:{}", ip, port).parse().expect("Invalid address");
-        let socket = UdpSocket::bind(address).expect("Failed to bind socket");
+        let socket = TokioUdpSocket::bind(address)
+            .await
+            .expect("Failed to bind socket");
+
         Node {
             key,
             address,
+            socket: Arc::new(socket),
             routing_table: Arc::new(RwLock::new(RoutingTable::new(bucket_size, num_buckets))),
-            socket,
+            request_map: RequestMap::new(),
+            message_dispatcher: Arc::new(MessageDispatcher::new().await),
         }
     }
 
-    pub async fn add_node(&self, key: Key, addr: SocketAddr) {
-        let rt = self.routing_table.write().await;
-        rt.add_node(key, addr).await;
-    }
-
-    pub async fn find_node(&self, key: &Key) -> Option<(Key, SocketAddr)> {
-        let rt = self.routing_table.read().await;
-        rt.find_node(key).await
-    }
-
-    pub async fn join_network_procedure(&self, bootstrap_node: SocketAddr) {
-
-        // 1. Cpy bootstrap nodes' routing table - maybe not necessary as step 2. does this?
-        // 2. Query itself against the bootstrap node (FIND_NODE), update RT
-        // 3. Iteratively query itself against nodes from 2. and onwards until stable state of routing table (nothing changes anymore)
-
-        //let message = KademliaMessage::new(
-        //                 KademliaMessageType::FindNode {
-        //                     node_id: self.key.clone(),
-        //                 },
-        //                 NodeInfo::new(self.key.clone(), None),
-        //                 NodeInfo::new(key.clone(), Some(addr.clone())),
-        //             );
-        //
-        //             send_message(message).await;
-    }
-
     ///
-    /// This method does listen for incoming messages.
+    /// Creates a listening task that indefinitely waits for incoming messages on this node's socket.
+    /// Incoming messages are parsed and dispatched to the appropriate handler.
+    /// This method is non-blocking and runs in the background.
     ///
-    pub async fn listen_for_messages(&self) {
-        let mut buffer = [0; 1024];
+    pub fn start_listening(&self) {
+        // Load references to the fields of the Node struct
+        let socket = Arc::clone(&self.socket);
+        let routing_table = Arc::clone(&self.routing_table);
+        let request_map = self.request_map.clone();
+        let message_dispatcher = Arc::clone(&self.message_dispatcher);
 
-        loop {
-            match self.socket.recv_from(&mut buffer) {
-                Ok((size, src)) => {
-                    let message = String::from_utf8_lossy(&buffer[..size]);
-                    self.receive_message(message, src);
-                }
-                Err(e) => {
-                    println!("Error while receiving from socket: {}", e);
+        // Spawn an indefinitely looping async task to listen for incoming messages
+        task::spawn(async move {
+            let mut buffer = [0; 1024]; // FIXME: Magic number
+            loop {
+                match socket.recv_from(&mut buffer).await {
+                    Ok((size, src)) => {
+                        let data = &buffer[..size];
+                        // Response
+                        if let Ok(response) = serde_json::from_slice::<Response>(data) {
+                            let request_map = request_map.clone();
+                            task::spawn(async move {
+                                // Use the map to send the response into the corresponding oneshot
+                                // Unknown requests IDs are filtered out by this method
+                                request_map.handle_response(response).await;
+                            });
+                        // Request
+                        } else if let Ok(request) = serde_json::from_slice::<Request>(data) {
+                            let routing_table = Arc::clone(&routing_table);
+                            let message_dispatcher = Arc::clone(&message_dispatcher);
+                            task::spawn(async move {
+                                handle_received_request(request, routing_table, message_dispatcher)
+                                    .await;
+                            });
+                        // Invalid incoming message
+                        } else {
+                            eprintln!("Failed to parse message from {}", src);
+                        }
+                    }
+                    // Reading from the socket failed
+                    Err(e) => {
+                        eprintln!("Error receiving message: {}", e);
+                    }
                 }
             }
-        }
-    }
-
-
-    ///
-    /// This method does determine what to do with received data.
-    /// If this receives a request, it will dispatch a new thread to handle it.
-    /// If this receives a response, it will pass it to a channel where a process
-    /// should be waiting for it.
-    ///
-    pub fn receive_message(&self, message: Cow<str>, sender: SocketAddr) {
-        let routing_table = self.routing_table.clone();
-        let parsed_message = kademlia_messages::parse_kademlia_message(message, sender);
-
-        // Handle response
-        if parsed_message.get_type().is_response() {
-            // todo response
-            return;
-        }
-
-        // Handle request
-        tokio::spawn(async move {
-            handle_received_request(parsed_message, routing_table).await;
         });
     }
 }

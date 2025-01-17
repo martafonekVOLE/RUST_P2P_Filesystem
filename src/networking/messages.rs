@@ -1,0 +1,167 @@
+use crate::config::K;
+use crate::core::key::Key;
+use crate::networking::node_info::NodeInfo;
+use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
+use thiserror::Error;
+use uuid::Uuid;
+
+// TODO docstrings
+
+pub type RequestId = Uuid; // TODO make a custom strut, abstract away implementation?
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum RequestType {
+    Ping,
+    FindNode { node_id: Key },
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub enum ResponseType {
+    Pong,
+    Nodes { nodes: [Option<NodeInfo>; K] },
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Request {
+    pub(crate) request_type: RequestType,
+    pub(crate) sender: NodeInfo,
+    pub(crate) receiver: NodeInfo,
+    pub(crate) request_id: RequestId,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct Response {
+    pub(crate) response_type: ResponseType,
+    pub(crate) sender: NodeInfo,
+    pub(crate) receiver: NodeInfo,
+    pub(crate) request_id: RequestId,
+}
+
+#[derive(Debug, Error)]
+pub enum MessageError {
+    #[error("Invalid message format: {0}")]
+    InvalidMessageFormat(String),
+
+    #[error("Unknown request type")]
+    UnknownRequestType,
+
+    #[error("Unknown response type")]
+    UnknownResponseType,
+}
+
+impl Request {
+    pub fn new(request_type: RequestType, sender: NodeInfo, receiver: NodeInfo) -> Self {
+        Request {
+            request_type,
+            sender,
+            receiver,
+            request_id: Uuid::new_v4(),
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).unwrap_or_else(|e| {
+            log::error!("Failed to serialize request: {}", e);
+            Vec::new()
+        })
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, MessageError> {
+        serde_json::from_slice(bytes).map_err(|e| MessageError::InvalidMessageFormat(e.to_string()))
+    }
+}
+
+impl Response {
+    pub fn new(
+        response_type: ResponseType,
+        sender: NodeInfo,
+        receiver: NodeInfo,
+        request_id: Uuid,
+    ) -> Self {
+        Response {
+            response_type,
+            sender,
+            receiver,
+            request_id,
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("Failed to serialize response")
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, MessageError> {
+        serde_json::from_slice(bytes).map_err(|e| MessageError::InvalidMessageFormat(e.to_string()))
+    }
+
+    pub fn is_response(&self) -> bool {
+        matches!(
+            self.response_type,
+            ResponseType::Pong | ResponseType::Nodes { .. }
+        )
+    }
+}
+
+pub fn parse_request(message: &[u8]) -> Result<Request, MessageError> {
+    Request::from_bytes(message)
+}
+
+pub fn parse_response(message: &[u8]) -> Result<Response, MessageError> {
+    Response::from_bytes(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::key::Key;
+
+    #[test]
+    fn test_request_serialization() {
+        let key = Key::new_random();
+        let sender = NodeInfo::new(
+            key.clone(),
+            SocketAddr::new("127.0.0.2".parse().unwrap(), 8080),
+        );
+        let receiver = NodeInfo::new(
+            key.clone(),
+            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
+        );
+
+        let request = Request::new(RequestType::Ping, sender.clone(), receiver.clone());
+        let serialized = request.to_bytes();
+        let deserialized = Request::from_bytes(&serialized).unwrap();
+
+        assert_eq!(deserialized.request_type, RequestType::Ping);
+        assert_eq!(deserialized.sender, sender);
+        assert_eq!(deserialized.receiver, receiver);
+    }
+
+    #[test]
+    fn test_response_serialization() {
+        let key = Key::new_random();
+        let sender = NodeInfo::new(
+            key.clone(),
+            SocketAddr::new("127.0.0.2".parse().unwrap(), 8080),
+        );
+        let receiver = NodeInfo::new(
+            key.clone(),
+            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
+        );
+        let request_id = Uuid::new_v4();
+
+        let response = Response::new(
+            ResponseType::Pong,
+            sender.clone(),
+            receiver.clone(),
+            request_id,
+        );
+        let serialized = response.to_bytes();
+        let deserialized = Response::from_bytes(&serialized).unwrap();
+
+        assert_eq!(deserialized.response_type, ResponseType::Pong);
+        assert_eq!(deserialized.sender, sender);
+        assert_eq!(deserialized.receiver, receiver);
+        assert_eq!(deserialized.request_id, request_id);
+    }
+}
