@@ -8,10 +8,6 @@ pub struct Arguments {
     /// Config file with node's configuration. In YAML format.
     pub config: String,
 
-    #[arg(short, long)]
-    /// Is it a beacon node?
-    pub beacon: bool,
-
     #[arg(long)]
     /// Use the cache logic. Dump config to cache file when turned off.
     pub cache: bool,
@@ -42,20 +38,6 @@ pub struct Arguments {
 mod tests {
     use super::*;
     use clap::Parser;
-
-    #[test]
-    fn test_argument_parsing_with_config() {
-        let args = Arguments::parse_from(["test", "--config", "config.yaml"]);
-        assert_eq!(args.config, "config.yaml");
-        assert!(!args.beacon);
-    }
-
-    #[test]
-    fn test_argument_parsing_with_beacon() {
-        let args = Arguments::parse_from(["test", "--config", "config.yaml", "--beacon"]);
-        assert_eq!(args.config, "config.yaml");
-        assert!(args.beacon);
-    }
 
     #[test]
     fn test_argument_parsing_with_cache() {
