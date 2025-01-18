@@ -97,7 +97,7 @@ impl Default for KBucket {
 mod tests {
     use super::*;
     use rand::Rng;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::net::{Ipv4Addr, SocketAddr};
 
     fn create_local_node() -> NodeInfo {
         let id = Key::new_random();

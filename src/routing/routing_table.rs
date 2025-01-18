@@ -2,8 +2,6 @@ use super::kbucket::KBucket;
 use crate::config::K;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub struct RoutingTable {
     id: Key,

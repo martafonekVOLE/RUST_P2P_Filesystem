@@ -74,7 +74,7 @@ async fn handle_find_node_message(
     let receiver = request.receiver;
 
     // Fetch the K closest nodes to the `node_id` from the routing table.
-    let closest_nodes = {
+    {
         let routing_table = routing_table.read().await;
         // TODO implement
         // routing_table.get_closest_nodes(&node_id)
@@ -101,6 +101,6 @@ async fn handle_find_node_message(
 /// TODO This method should belong to the RoutingTable struct.
 ///
 async fn record_possible_neighbour(routing_table: Arc<RwLock<RoutingTable>>, node: &NodeInfo) {
-    let mut routing_table = routing_table.write().await;
+    let routing_table = routing_table.write().await;
     // TODO routing_table.update_with_node(node.clone());
 }

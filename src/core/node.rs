@@ -36,7 +36,7 @@ impl Node {
             .expect("Failed to bind socket");
 
         let this_node_info = NodeInfo {
-            id: key.clone(),
+            id: key,
             address,
         };
 
@@ -55,7 +55,7 @@ impl Node {
     /// This method converts Node to NodeInfo
     ///
     fn to_node_info(&self) -> NodeInfo {
-        NodeInfo::new(self.key.clone(), self.address.clone())
+        NodeInfo::new(self.key, self.address)
     }
 
     ///
