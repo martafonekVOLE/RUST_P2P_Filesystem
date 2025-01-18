@@ -22,19 +22,19 @@ impl Node {
         Node {
             key,
             address,
-            routing_table: Arc::new(RwLock::new(RoutingTable::new(bucket_size, num_buckets))),
+            routing_table: Arc::new(RwLock::new(RoutingTable::new(Key::new_random()))),
             socket,
         }
     }
 
     pub async fn add_node(&self, key: Key, addr: SocketAddr) {
         let rt = self.routing_table.write().await;
-        rt.add_node(key, addr).await;
+        todo!();
     }
 
     pub async fn find_node(&self, key: &Key) -> Option<(Key, SocketAddr)> {
         let rt = self.routing_table.read().await;
-        rt.find_node(key).await
+        todo!();
     }
 
     pub fn receive_message(&self, message: Cow<str>, sender: SocketAddr) {

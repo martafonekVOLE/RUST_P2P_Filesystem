@@ -1,51 +1,26 @@
 mod cli;
 mod config;
-mod core;
-mod networking;
-mod routing;
-mod sharding;
-mod storage;
-mod utils;
 
-use clap::{Command, Arg};
-use std::error::Error;
-
-#[derive(Debug)]
-struct Arguments {
-    config: String,
-    port: u16,
-}
-
-impl Arguments {
-    fn new() -> Result<Self, Box<dyn Error>> {
-        let matches = Command::new("Peer-to-peer System")
-            .version("1.0.0")
-            .author("TODO")
-            .about("TODO")
-            .arg(
-                Arg::new("config")
-                    .short('c')
-                    .long("config")
-            )
-            .arg(
-                Arg::new("port")
-                    .short('p')
-                    .long("port")
-            )
-            .get_matches();
-
-        Ok(Self {
-            config: matches.get_one::<String>("config").expect("Config is required").clone(),
-            port: matches.get_one::<String>("port").unwrap().parse::<u16>().expect("Port is required").clone(),
-        })
-    }
-}
+use clap::Parser;
+use cli::args::Arguments;
+use config::Config;
+use std::fs;
 
 fn main() {
-    let config = Arguments::new().expect("Failed to parse CLI arguments");
-    
-    println!("{:?}", config);
+    let args = Arguments::parse();
 
-    println!("Config file path: {}", config.config);
-    println!("Port: {}", config.port);
+    let config_content = fs::read_to_string(&args.config).expect("Failed to read config file");
+    let mut config: Config =
+        serde_yaml::from_str(&config_content).expect("Failed to parse config file");
+
+    if args.beacon {
+        config.beacon_node_address = None;
+    } else if config.beacon_node_address.is_none() {
+        panic!("Beacon node address must be provided if not running as a beacon node");
+    }
+
+    println!("{:?}", args);
+    println!("{:?}", config);
 }
+
+

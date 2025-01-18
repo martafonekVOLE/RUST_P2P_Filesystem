@@ -1,2 +1,2 @@
-pub(crate) mod key;
+pub mod key;
 pub(crate) mod node;
