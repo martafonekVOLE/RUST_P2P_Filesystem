@@ -40,6 +40,23 @@ impl Key {
         distance
     }
 
+    /// Count the number of leading zeros in the XOR distance
+    pub fn leading_zeros(&self, other: &Key) -> usize {
+        let distance = self.distance(other);
+        let mut count = 0;
+
+        for byte in &distance {
+            if *byte == 0 {
+                count += 8; // A zero byte contributes 8 leading zeros
+            } else {
+                count += byte.leading_zeros() as usize;
+                break; // Stop as soon as a non-zero byte is encountered
+            }
+        }
+
+        count
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         self.value.to_vec()
     }

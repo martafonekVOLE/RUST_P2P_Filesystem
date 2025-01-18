@@ -1,2 +1,2 @@
 mod kbucket;
-pub(crate) mod routing_table;
+pub mod routing_table;

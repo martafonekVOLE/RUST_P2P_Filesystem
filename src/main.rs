@@ -1,16 +1,26 @@
 mod cli;
 mod config;
-mod core;
-mod networking;
-mod routing;
-mod sharding;
-mod storage;
-mod utils;
+
+use clap::Parser;
+use cli::args::Arguments;
+use config::Config;
+use std::fs;
 
 fn main() {
-    // Init node struct
+    let args = Arguments::parse();
 
-    // Run node.start_listening()
+    let config_content = fs::read_to_string(&args.config).expect("Failed to read config file");
+    let mut config: Config =
+        serde_yaml::from_str(&config_content).expect("Failed to parse config file");
 
-    // Parse input from the CLI - ping node_id, find_node node_id in a loop
+    if args.beacon {
+        config.beacon_node_address = None;
+    } else if config.beacon_node_address.is_none() {
+        panic!("Beacon node address must be provided if not running as a beacon node");
+    }
+
+    println!("{:?}", args);
+    println!("{:?}", config);
 }
+
+
