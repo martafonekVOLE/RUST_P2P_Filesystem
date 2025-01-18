@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::net::{SocketAddr, Ipv4Addr};
 use rand::Rng;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct NodeInfo {
     pub id: Key,
     pub address: SocketAddr,
