@@ -78,10 +78,11 @@ impl KBucket {
         }
     }
 
-    pub fn find_node(&self, key: &Key) -> Option<&NodeInfo> {
+    pub fn get_node(&self, key: &Key) -> Option<&NodeInfo> {
         self.nodes.iter().find(|n| n.id == *key)
     }
 
+    // TODO: remove?
     pub fn get_nodes(&self) -> &VecDeque<NodeInfo> {
         &self.nodes
     }
@@ -133,7 +134,7 @@ mod tests {
         let node = create_local_node();
 
         assert!(kbucket.add_node(node.clone()));
-        let found_node = kbucket.find_node(&node.id);
+        let found_node = kbucket.get_node(&node.id);
         assert!(found_node.is_some());
         assert_eq!(found_node.unwrap(), &node);
     }

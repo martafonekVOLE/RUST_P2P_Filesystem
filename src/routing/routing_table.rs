@@ -5,7 +5,6 @@ use crate::networking::node_info::NodeInfo;
 
 pub struct RoutingTable {
     id: Key,
-    //buckets: Vec<Arc<RwLock<KBucket>>>,
     buckets: Vec<KBucket>,
     bucket_size: usize, // TODO: remove?
 }
@@ -15,9 +14,6 @@ impl RoutingTable {
     pub const NUM_BUCKETS: usize = K * 8; // Key byte length * bits_per_byte
 
     pub fn new(id: Key) -> Self {
-        // let buckets = (0..Self::NUM_BUCKETS)
-        //     .map(|_| Arc::new(RwLock::new(KBucket::new())))
-        //     .collect();
         RoutingTable {
             id,
             buckets: vec![KBucket::new(); Self::NUM_BUCKETS],
@@ -34,13 +30,14 @@ impl RoutingTable {
         }
     }
 
-    pub fn get_nodeinfo(&self, key: &Key) -> Option<NodeInfo> {
-        todo!()
+    pub fn get_nodeinfo(&self, key: &Key) -> Option<&NodeInfo> {
+        let bucket_index = self.id.leading_zeros(key);
+        if let Some(bucket) = self.buckets.get(bucket_index) {
+            bucket.get_node(key)
+        } else {
+            None
+        }
     }
-
-    // pub fn get_buckets(&self) -> Vec<Arc<RwLock<KBucket>>> {
-    //     self.buckets.clone()
-    // }
 }
 
 #[cfg(test)]
@@ -58,9 +55,6 @@ mod tests {
 
         // Verify the number of buckets
         assert_eq!(routing_table.buckets.len(), RoutingTable::NUM_BUCKETS);
-        // for bucket in &routing_table.get_buckets() {
-        //     assert!(bucket.read()); // Ensure each bucket is initialized
-        // }
     }
     #[test]
     fn test_store_nodeinfo_success() {
@@ -78,8 +72,7 @@ mod tests {
         // Verify the node is added to the correct bucket
         let bucket_index = id.leading_zeros(&remote_id);
         let bucket = routing_table.buckets.get(bucket_index).unwrap();
-        //let bucket = bucket.read().await;
 
-        assert!(bucket.find_node(&node_info.get_id()).is_some());
+        assert!(bucket.get_node(&node_info.get_id()).is_some());
     }
 }
