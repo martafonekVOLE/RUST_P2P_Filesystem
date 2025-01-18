@@ -74,7 +74,7 @@ async fn handle_find_node_message(
     let receiver = request.receiver;
 
     // Fetch the K closest nodes to the `node_id` from the routing table.
-    {
+    let closest_nodes = {
         let routing_table = routing_table.read().await;
         // TODO implement
         // routing_table.get_closest_nodes(&node_id)

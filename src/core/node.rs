@@ -15,7 +15,6 @@ use tokio::time::{timeout, Duration};
 pub struct Node {
     key: Key,
     address: SocketAddr,
-    node_info: NodeInfo,
     socket: Arc<TokioUdpSocket>, // Use Tokio's UdpSocket for async I/O
     routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
@@ -35,15 +34,9 @@ impl Node {
             .await
             .expect("Failed to bind socket");
 
-        let this_node_info = NodeInfo {
-            id: key,
-            address,
-        };
-
         Node {
             key,
             address,
-            node_info: this_node_info,
             socket: Arc::new(socket),
             routing_table: Arc::new(RwLock::new(RoutingTable::new(key))),
             request_map: RequestMap::new(),

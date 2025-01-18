@@ -118,14 +118,8 @@ mod tests {
     #[test]
     fn test_request_serialization() {
         let key = Key::new_random();
-        let sender = NodeInfo::new(
-            key,
-            SocketAddr::new("127.0.0.2".parse().unwrap(), 8080),
-        );
-        let receiver = NodeInfo::new(
-            key,
-            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
-        );
+        let sender = NodeInfo::new(key, SocketAddr::new("127.0.0.2".parse().unwrap(), 8080));
+        let receiver = NodeInfo::new(key, SocketAddr::new("127.0.0.1".parse().unwrap(), 8080));
 
         let request = Request::new(RequestType::Ping, sender.clone(), receiver.clone());
         let serialized = request.to_bytes();
@@ -139,14 +133,8 @@ mod tests {
     #[test]
     fn test_response_serialization() {
         let key = Key::new_random();
-        let sender = NodeInfo::new(
-            key,
-            SocketAddr::new("127.0.0.2".parse().unwrap(), 8080),
-        );
-        let receiver = NodeInfo::new(
-            key,
-            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
-        );
+        let sender = NodeInfo::new(key, SocketAddr::new("127.0.0.2".parse().unwrap(), 8080));
+        let receiver = NodeInfo::new(key, SocketAddr::new("127.0.0.1".parse().unwrap(), 8080));
         let request_id = Uuid::new_v4();
 
         let response = Response::new(
