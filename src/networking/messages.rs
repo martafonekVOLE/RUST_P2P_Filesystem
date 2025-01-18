@@ -112,9 +112,9 @@ pub fn parse_response(message: &[u8]) -> Result<Response, MessageError> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
     use super::*;
     use crate::core::key::Key;
+    use std::net::SocketAddr;
 
     #[test]
     fn test_request_serialization() {

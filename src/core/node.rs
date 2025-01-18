@@ -58,7 +58,7 @@ impl Node {
     pub async fn ping(&self, node_id: Key) -> Result<Response, &str> {
         // Get the address from RT
         let receiver = match self.routing_table.read().await.get_nodeinfo(&node_id) {
-            Some(receiver) => receiver,
+            Some(receiver) => receiver.clone(),
             None => return Err("PING failed. Receiver could not be found in the routing table."),
         };
 
