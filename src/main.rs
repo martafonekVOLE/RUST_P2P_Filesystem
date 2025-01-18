@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod utils;
 
 use clap::Parser;
 use cli::args::Arguments;
@@ -22,5 +23,3 @@ fn main() {
     println!("{:?}", args);
     println!("{:?}", config);
 }
-
-

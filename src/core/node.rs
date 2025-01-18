@@ -44,7 +44,7 @@ impl Node {
             address,
             node_info: this_node_info,
             socket: Arc::new(socket),
-            routing_table: Arc::new(RwLock::new(RoutingTable::new(bucket_size, num_buckets))),
+            routing_table: Arc::new(RwLock::new(RoutingTable::new(key))),
             request_map: RequestMap::new(),
             message_dispatcher: Arc::new(MessageDispatcher::new().await),
         }
