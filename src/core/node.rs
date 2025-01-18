@@ -1,5 +1,5 @@
+use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
-use crate::networking::incoming_request_handler::handle_received_request;
 use crate::networking::message_dispatcher::MessageDispatcher;
 use crate::networking::messages::{Request, Response};
 use crate::networking::node_info::NodeInfo;
