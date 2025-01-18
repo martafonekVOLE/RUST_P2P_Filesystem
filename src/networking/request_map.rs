@@ -52,6 +52,9 @@ impl RequestMap {
     /// This method is thread-safe.
     pub async fn handle_response(&self, response: Response) {
         let request_id = response.request_id;
+
+        // TODO check if the request ID is valid is present?
+
         if let Some(sender) = self.take_request(&request_id).await {
             if sender.send(response).is_err() {
                 log_error(&format!("Failed to resolve request with ID {}", request_id));

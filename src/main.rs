@@ -7,4 +7,10 @@ mod sharding;
 mod storage;
 mod utils;
 
-fn main() {}
+fn main() {
+    // Init node struct
+
+    // Run node.start_listening()
+
+    // Parse input from the CLI - ping node_id, find_node node_id in a loop
+}

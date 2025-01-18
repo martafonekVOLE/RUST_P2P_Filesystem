@@ -2,6 +2,7 @@ use crate::core::key::Key;
 use crate::networking::incoming_request_handler::handle_received_request;
 use crate::networking::message_dispatcher::MessageDispatcher;
 use crate::networking::messages::{Request, Response};
+use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
 use std::net::SocketAddr;
@@ -13,6 +14,7 @@ use tokio::task;
 pub struct Node {
     key: Key,
     address: SocketAddr,
+    node_info: NodeInfo,
     socket: Arc<TokioUdpSocket>, // Use Tokio's UdpSocket for async I/O
     routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
@@ -32,14 +34,50 @@ impl Node {
             .await
             .expect("Failed to bind socket");
 
+        let this_node_info = NodeInfo {
+            id: key.clone(),
+            address,
+        };
+
         Node {
             key,
             address,
+            node_info: this_node_info,
             socket: Arc::new(socket),
             routing_table: Arc::new(RwLock::new(RoutingTable::new(bucket_size, num_buckets))),
             request_map: RequestMap::new(),
             message_dispatcher: Arc::new(MessageDispatcher::new().await),
         }
+    }
+
+    ///
+    /// Sends a PING request to the specified node ID.
+    /// Awaits a PONG response and returns whether the node is reachable.
+    ///
+    pub async fn ping(&self, node_id: Key) -> bool {
+        // Create request
+
+        // Get the address from RT
+
+        // Record request in the request map
+
+        // Use message dispatcher send
+
+        // Await response
+
+        todo!()
+    }
+
+    ///
+    /// Sends a FIND_NODE request to the specified node ID.
+    /// Awaits a response containing the closest nodes to the requested node ID.
+    ///
+    pub async fn find_node(&self, node_id: Key) -> Option<Vec<NodeInfo>> {
+        todo!()
+    }
+
+    pub fn join_network() {
+        todo!()
     }
 
     ///
