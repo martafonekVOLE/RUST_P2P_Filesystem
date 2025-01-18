@@ -1,15 +1,16 @@
 use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
 use crate::networking::message_dispatcher::MessageDispatcher;
-use crate::networking::messages::{Request, Response};
+use crate::networking::messages::{Request, RequestType, Response};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket as TokioUdpSocket;
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 use tokio::task;
+use tokio::time::{timeout, Duration};
 
 pub struct Node {
     key: Key,
@@ -51,21 +52,45 @@ impl Node {
     }
 
     ///
+    /// This method converts Node to NodeInfo
+    ///
+    fn to_node_info(&self) -> NodeInfo {
+        NodeInfo::new(self.key.clone(), self.address.clone())
+    }
+
+    ///
     /// Sends a PING request to the specified node ID.
     /// Awaits a PONG response and returns whether the node is reachable.
     ///
-    pub async fn ping(&self, node_id: Key) -> bool {
-        // Create request
-
+    pub async fn ping(&self, node_id: Key) -> Result<Response, &str> {
         // Get the address from RT
+        let receiver = match self.routing_table.read().await.get_nodeinfo(&node_id) {
+            Some(receiver) => receiver,
+            None => return Err("PING failed. Receiver could not be found in the routing table."),
+        };
+
+        // Create request
+        let request = Request::new(RequestType::Ping, self.to_node_info(), receiver);
+
+        // Create comms channel
+        let (sender, receiver) = oneshot::channel::<Response>();
 
         // Record request in the request map
+        self.request_map
+            .add_request(request.request_id, sender)
+            .await;
 
         // Use message dispatcher send
+        let _dispatcher_response = match self.message_dispatcher.send_request(request).await {
+            Ok(response) => response,
+            Err(_) => return Err("PING failed. Unable to send request."),
+        };
 
-        // Await response
-
-        todo!()
+        match timeout(Duration::from_secs(10), receiver).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(_)) => Err("PING failed. Did not receive any response."),
+            Err(_) => Err("PING failed. Timed out."),
+        }
     }
 
     ///

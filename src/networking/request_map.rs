@@ -48,7 +48,7 @@ impl RequestMap {
 impl RequestMap {
     /// Handles an incoming response.
     /// Checks if the response's `request_id` matches a pending request, and sends it to the corresponding oneshot.
-    /// If the request ID is unknown, logs a warning and discards the incomming response.
+    /// If the request ID is unknown, logs a warning and discards the incoming response.
     /// This method is thread-safe.
     pub async fn handle_response(&self, response: Response) {
         let request_id = response.request_id;

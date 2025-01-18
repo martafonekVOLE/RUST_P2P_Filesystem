@@ -36,6 +36,10 @@ impl RoutingTable {
         }
     }
 
+    pub fn get_nodeinfo(&self, key: &Key) -> Option<NodeInfo> {
+        todo!()
+    }
+
     // pub fn get_buckets(&self) -> Vec<Arc<RwLock<KBucket>>> {
     //     self.buckets.clone()
     // }
