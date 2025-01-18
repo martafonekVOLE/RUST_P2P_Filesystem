@@ -75,4 +75,34 @@ mod tests {
 
         assert!(bucket.get_node(&node_info.get_id()).is_some());
     }
+
+    #[test]
+    fn test_get_nodeinfo_success() {
+        let id = Key::from_input(b"local_node");
+        let mut routing_table = RoutingTable::new(id);
+
+        let remote_id = Key::from_input(b"remote_node");
+        let remote_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
+        let node_info = NodeInfo::new(remote_id, remote_address);
+
+        // Store the node
+        routing_table.store_nodeinfo(node_info.clone());
+
+        // Retrieve the node and verify success
+        let result = routing_table.get_nodeinfo(&remote_id);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), &node_info);
+    }
+
+    #[test]
+    fn test_get_nodeinfo_failure() {
+        let id = Key::from_input(b"local_node");
+        let routing_table = RoutingTable::new(id);
+
+        let remote_id = Key::from_input(b"remote_node");
+
+        // Attempt to retrieve a non-existent node
+        let result = routing_table.get_nodeinfo(&remote_id);
+        assert!(result.is_none());
+    }
 }
