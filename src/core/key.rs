@@ -127,7 +127,6 @@ impl Key {
 
 impl fmt::Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Print as a 40-char hex string
         for byte in &self.value {
             write!(f, "{:02x}", byte)?;
         }
