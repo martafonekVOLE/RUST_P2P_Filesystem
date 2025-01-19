@@ -1,8 +1,8 @@
-use std::collections::VecDeque;
 use super::kbucket::KBucket;
 use crate::config::K;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
+use std::collections::VecDeque;
 
 pub struct RoutingTable {
     id: Key,
@@ -40,8 +40,12 @@ impl RoutingTable {
         }
     }
 
-    pub fn get_all_nodeinfos(&self) -> &VecDeque<&NodeInfo> {
-        todo!()
+    pub fn get_all_nodeinfos(&self) -> Vec<NodeInfo> {
+        let mut all_nodes = Vec::new();
+        for bucket in &self.buckets {
+            all_nodes.extend(bucket.get_nodes().iter().cloned());
+        }
+        all_nodes
     }
 }
 
@@ -109,5 +113,28 @@ mod tests {
         // Attempt to retrieve a non-existent node
         let result = routing_table.get_nodeinfo(&remote_id);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_all_nodeinfos() {
+        let id = Key::new_random();
+        let mut routing_table = RoutingTable::new(id);
+
+        let node1 = NodeInfo::new(
+            Key::new_random(),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080),
+        );
+        let node2 = NodeInfo::new(
+            Key::new_random(),
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8081),
+        );
+
+        routing_table.store_nodeinfo(node1.clone());
+        routing_table.store_nodeinfo(node2.clone());
+
+        let all_nodes = routing_table.get_all_nodeinfos();
+        assert_eq!(all_nodes.len(), 2);
+        assert!(all_nodes.contains(&node1));
+        assert!(all_nodes.contains(&node2));
     }
 }
