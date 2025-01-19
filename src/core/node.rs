@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
 use crate::networking::message_dispatcher::MessageDispatcher;
@@ -9,6 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket as TokioUdpSocket;
 use tokio::sync::{oneshot, RwLock};
+use tokio::sync::oneshot::Receiver;
 use tokio::task;
 use tokio::time::{timeout, Duration};
 
@@ -90,10 +92,25 @@ impl Node {
     /// Sends a FIND_NODE request to the specified node ID.
     /// Awaits a response containing the closest nodes to the requested node ID.
     ///
-    pub async fn find_node(&self, node_id: Key) -> Option<Vec<NodeInfo>> {
-        todo!()
-    }
+    pub async fn find_node(&self, node_id: Key) -> Result<NodeInfo, &str> {
+        if let Some(node_info) = self.routing_table.read().await.get_nodeinfo(&node_id) {
+            return Ok(node_info.clone());
+        }
 
+        let rt = self.routing_table.read().await;
+
+        let nodes = rt.get_all_nodeinfos();
+        let mut sorted_nodes = nodes.clone().make_contiguous().to_vec();
+        sorted_nodes.sort_by(|a: &&NodeInfo, b: &&NodeInfo| {
+            let dist_a = a.id.distance(&node_id);
+            let dist_b = b.id.distance(&node_id);
+            dist_a.cmp(&dist_b)
+        });
+
+
+        Err("tbd")
+
+    }
     pub fn join_network() {
         todo!()
     }

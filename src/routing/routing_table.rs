@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use super::kbucket::KBucket;
 use crate::config::K;
 use crate::core::key::Key;
@@ -37,6 +38,10 @@ impl RoutingTable {
         } else {
             None
         }
+    }
+
+    pub fn get_all_nodeinfos(&self) -> &VecDeque<&NodeInfo> {
+        todo!()
     }
 }
 

@@ -5,7 +5,7 @@ use sha1::{Digest, Sha1};
 use std::cmp::Ordering;
 use std::fmt;
 
-type KeyValue = [u8; K];
+pub type KeyValue = [u8; K];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Serialize, Deserialize)]
 pub struct Key {
