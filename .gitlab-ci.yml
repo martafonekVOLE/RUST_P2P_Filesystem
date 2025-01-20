@@ -17,12 +17,51 @@
 #     - template: Security/SAST.gitlab-ci.yml
 # ------------------------------------------
 stages:
-- lint
+  - lint
+  - build
+  - test
 
+# Lint stage
 lint:
   stage: lint
   image: rust:latest
+  # Caching Rust build artifacts can speed up subsequent runs
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}"
+    paths:
+      - target
+      - Cargo.lock
   script:
+    # Install clippy if it's not available
     - rustup component add clippy
+    # Run clippy in a strict mode: fails if there are any warnings
     - cargo clippy -- -D warnings
+    
+    # Also runs cargo fmt -- --check to fail if code formatting is not correct.
+    # This ensures all code remains consistently formatted.
     - cargo fmt -- --check
+
+# Build stage
+build:
+  stage: build
+  image: rust:latest
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}"
+    paths:
+      - target
+      - Cargo.lock
+  script:
+    - cargo build --release
+
+# Test stage
+test:
+  stage: test
+  image: rust:latest
+  cache:
+    key: "${CI_COMMIT_REF_SLUG}"
+    paths:
+      - target
+      - Cargo.lock
+  script:
+    - cargo test
+
