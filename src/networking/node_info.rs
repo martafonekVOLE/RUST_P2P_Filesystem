@@ -1,7 +1,6 @@
 use crate::core::key::Key;
 use serde::{Deserialize, Serialize};
-use std::net::{SocketAddr, Ipv4Addr};
-use rand::Rng;
+use std::net::SocketAddr;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct NodeInfo {

@@ -22,13 +22,7 @@ pub struct Node {
 }
 
 impl Node {
-    pub async fn new(
-        key: Key,
-        ip: String,
-        port: u16,
-        bucket_size: usize,
-        num_buckets: usize,
-    ) -> Self {
+    pub async fn new(key: Key, ip: String, port: u16) -> Self {
         let address = format!("{}:{}", ip, port).parse().expect("Invalid address");
         let socket = TokioUdpSocket::bind(address)
             .await
