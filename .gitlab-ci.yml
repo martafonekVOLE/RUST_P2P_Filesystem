@@ -17,7 +17,7 @@
 #     - template: Security/SAST.gitlab-ci.yml
 # ------------------------------------------
 stages:
-  - lint
+- lint
 
 lint:
   stage: lint
