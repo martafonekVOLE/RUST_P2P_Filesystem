@@ -4,6 +4,14 @@ use std::collections::VecDeque;
 
 use crate::networking::node_info::NodeInfo;
 
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum KBucketError {
+    #[error("Not enough space in K-bucket")]
+    NotEnoughSpace,
+}
+
 #[derive(Clone)]
 pub struct KBucket {
     nodes: VecDeque<NodeInfo>,
@@ -43,13 +51,13 @@ impl KBucket {
         }
     }
 
-    pub fn add_node(&mut self, node: NodeInfo) -> bool {
+    pub fn add_node(&mut self, node: NodeInfo) -> Result<(), KBucketError> {
         // Remove if exists
         self.remove_node(&node.id);
 
         if self.nodes.len() < self.capacity {
             self.nodes.push_back(node);
-            return true;
+            return Ok(());
         }
 
         /*  TODO:
@@ -66,15 +74,14 @@ impl KBucket {
             -> return true
         */
 
-        false
+        Err(KBucketError::NotEnoughSpace) // TODO: change error name
     }
 
-    pub fn remove_node(&mut self, key: &Key) -> bool {
+    pub fn remove_node(&mut self, key: &Key) -> Option<NodeInfo> {
         if let Some(pos) = self.nodes.iter().position(|n| n.id == *key) {
-            self.nodes.remove(pos);
-            true
+            self.nodes.remove(pos)
         } else {
-            false
+            None
         }
     }
 
@@ -112,7 +119,7 @@ mod tests {
         let mut kbucket = KBucket::new();
         let node = create_local_node();
 
-        assert!(kbucket.add_node(node.clone()));
+        assert!(kbucket.add_node(node.clone()).is_ok());
         assert_eq!(kbucket.nodes.len(), 1);
         assert_eq!(kbucket.nodes.back().unwrap(), &node);
     }
@@ -122,9 +129,9 @@ mod tests {
         let mut kbucket = KBucket::new();
         let node = create_local_node();
 
-        assert!(kbucket.add_node(node.clone()));
+        assert!(kbucket.add_node(node.clone()).is_ok());
         assert_eq!(kbucket.nodes.len(), 1);
-        assert!(kbucket.remove_node(&node.id));
+        assert!(kbucket.remove_node(&node.id).is_some());
         assert_eq!(kbucket.nodes.len(), 0);
     }
 
@@ -133,7 +140,7 @@ mod tests {
         let mut kbucket = KBucket::new();
         let node = create_local_node();
 
-        assert!(kbucket.add_node(node.clone()));
+        assert!(kbucket.add_node(node.clone()).is_ok());
         let found_node = kbucket.get_node(&node.id);
         assert!(found_node.is_some());
         assert_eq!(found_node.unwrap(), &node);
@@ -144,7 +151,7 @@ mod tests {
         let mut kbucket = KBucket::new();
         for _ in 0..K {
             let node = create_local_node();
-            assert!(kbucket.add_node(node.clone()));
+            assert!(kbucket.add_node(node.clone()).is_ok());
         }
         assert_eq!(kbucket.nodes.len(), K);
     }
@@ -160,8 +167,8 @@ mod tests {
 
         assert_eq!(&node1.get_id(), &node2.get_id());
 
-        assert!(kbucket.add_node(node1.clone()));
-        assert!(kbucket.add_node(node2.clone()));
+        assert!(kbucket.add_node(node1.clone()).is_ok());
+        assert!(kbucket.add_node(node2.clone()).is_ok());
         assert_eq!(kbucket.nodes.len(), 1);
         assert_eq!(kbucket.nodes.back().unwrap(), &node2);
     }
@@ -171,10 +178,10 @@ mod tests {
         let mut kbucket = KBucket::new();
         for _ in 0..K {
             let node = create_local_node();
-            assert!(kbucket.add_node(node.clone()));
+            assert!(kbucket.add_node(node.clone()).is_ok());
         }
         let new_node = create_local_node();
-        assert!(!kbucket.add_node(new_node));
+        assert!(!kbucket.add_node(new_node).is_ok());
         assert_eq!(kbucket.nodes.len(), K);
     }
 }
