@@ -6,7 +6,7 @@ use crate::networking::node_info::NodeInfo;
 
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum KBucketError {
     #[error("Not enough space in K-bucket")]
     NotEnoughSpace,
