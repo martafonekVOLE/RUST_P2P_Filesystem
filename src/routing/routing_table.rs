@@ -37,6 +37,8 @@ impl RoutingTable {
     // Must be 160
     pub const NUM_BUCKETS: usize = K * 8; // Key byte length * bits_per_byte
 
+    fn init(&mut self) {}
+
     pub fn new(id: Key) -> Self {
         RoutingTable {
             id,
