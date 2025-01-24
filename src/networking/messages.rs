@@ -2,7 +2,6 @@ use crate::constants::K;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -19,7 +18,24 @@ pub enum RequestType {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum ResponseType {
     Pong,
-    Nodes { nodes: [Option<NodeInfo>; K] },
+    Nodes { nodes: Vec<NodeInfo> },
+}
+
+impl ResponseType {
+    pub fn new_nodes(nodes: Vec<NodeInfo>) -> Result<Self, &'static str> {
+        if nodes.len() > K {
+            Err("The vector exceeds the maximum allowed length")
+        } else {
+            Ok(ResponseType::Nodes { nodes })
+        }
+    }
+
+    pub fn nodes_into_vec(self) -> Result<Vec<NodeInfo>, &'static str> {
+        match self {
+            ResponseType::Nodes { nodes } => Ok(nodes),
+            _ => Err("Attempted to convert wrong response type - expected Nodes"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -115,18 +131,13 @@ pub fn parse_response(message: &[u8]) -> Result<Response, MessageError> {
 mod tests {
     use super::*;
     use crate::core::key::Key;
+    use std::net::SocketAddr;
 
     #[test]
     fn test_request_serialization() {
         let key = Key::new_random();
-        let sender = NodeInfo::new(
-            key.clone(),
-            SocketAddr::new("127.0.0.2".parse().unwrap(), 8080),
-        );
-        let receiver = NodeInfo::new(
-            key.clone(),
-            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
-        );
+        let sender = NodeInfo::new(key, SocketAddr::new("127.0.0.2".parse().unwrap(), 8080));
+        let receiver = NodeInfo::new(key, SocketAddr::new("127.0.0.1".parse().unwrap(), 8080));
 
         let request = Request::new(RequestType::Ping, sender.clone(), receiver.clone());
         let serialized = request.to_bytes();
@@ -140,14 +151,8 @@ mod tests {
     #[test]
     fn test_response_serialization() {
         let key = Key::new_random();
-        let sender = NodeInfo::new(
-            key.clone(),
-            SocketAddr::new("127.0.0.2".parse().unwrap(), 8080),
-        );
-        let receiver = NodeInfo::new(
-            key.clone(),
-            SocketAddr::new("127.0.0.1".parse().unwrap(), 8080),
-        );
+        let sender = NodeInfo::new(key, SocketAddr::new("127.0.0.2".parse().unwrap(), 8080));
+        let receiver = NodeInfo::new(key, SocketAddr::new("127.0.0.1".parse().unwrap(), 8080));
         let request_id = Uuid::new_v4();
 
         let response = Response::new(

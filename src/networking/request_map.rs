@@ -20,6 +20,9 @@ impl RequestMap {
 
     /// Adds a new request entry.
     /// A thread has to pass in an oneshot sender to receive the response.
+    /// The caller is responsible for ensuring that request IDs are unique.
+    /// The caller is responsible for removing the request entry if it reaches some timeout and
+    /// no longer awaits the response on the channel
     pub async fn add_request(&self, request_id: RequestId, sender: oneshot::Sender<Response>) {
         let mut map = self.map.write().await;
         map.insert(request_id, sender);
@@ -38,6 +41,11 @@ impl RequestMap {
         map.contains_key(request_id)
     }
 
+    pub async fn remove_request(&self, request_id: &RequestId) {
+        let mut map = self.map.write().await;
+        map.remove(request_id);
+    }
+
     /// Clears all entries in the request map.
     pub async fn clear(&self) {
         let mut map = self.map.write().await;
@@ -48,7 +56,7 @@ impl RequestMap {
 impl RequestMap {
     /// Handles an incoming response.
     /// Checks if the response's `request_id` matches a pending request, and sends it to the corresponding oneshot.
-    /// If the request ID is unknown, logs a warning and discards the incomming response.
+    /// If the request ID is unknown, logs a warning and discards the incoming response.
     /// This method is thread-safe.
     pub async fn handle_response(&self, response: Response) {
         let request_id = response.request_id;
@@ -87,7 +95,7 @@ mod tests {
         );
         let receiver_node = NodeInfo::new(
             Key::new_random(),
-            SocketAddr::new("127.0.0.2".parse().unwrap(), 8081),
+            SocketAddr::new("127.0.0.1".parse().unwrap(), 8081),
         );
 
         let (sender, receiver) = oneshot::channel();
