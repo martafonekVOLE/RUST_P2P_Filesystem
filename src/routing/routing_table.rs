@@ -2,7 +2,6 @@ use super::kbucket::KBucket;
 use crate::config::{ALPHA, K};
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
-use std::collections::VecDeque;
 
 use thiserror::Error;
 
@@ -10,6 +9,12 @@ use thiserror::Error;
 pub enum RoutingTableError {
     #[error("All k-buckets are empty")]
     Empty,
+}
+
+impl From<RoutingTableError> for String {
+    fn from(error: RoutingTableError) -> Self {
+        error.to_string()
+    }
 }
 
 pub struct RoutingTable {

@@ -18,7 +18,24 @@ pub enum RequestType {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum ResponseType {
     Pong,
-    Nodes { nodes: [Option<NodeInfo>; K] },
+    Nodes { nodes: Vec<NodeInfo> },
+}
+
+impl ResponseType {
+    pub fn new_nodes(nodes: Vec<NodeInfo>) -> Result<Self, &'static str> {
+        if nodes.len() > K {
+            Err("The vector exceeds the maximum allowed length")
+        } else {
+            Ok(ResponseType::Nodes { nodes })
+        }
+    }
+
+    pub fn nodes_into_vec(self) -> Result<Vec<NodeInfo>, &'static str> {
+        match self {
+            ResponseType::Nodes { nodes } => Ok(nodes),
+            _ => Err("Attempted to convert wrong response type - expected Nodes"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

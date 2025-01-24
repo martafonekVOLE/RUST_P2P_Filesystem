@@ -20,6 +20,9 @@ impl RequestMap {
 
     /// Adds a new request entry.
     /// A thread has to pass in an oneshot sender to receive the response.
+    /// The caller is responsible for ensuring that request IDs are unique.
+    /// The caller is responsible for removing the request entry if it reaches some timeout and
+    /// no longer awaits the response on the channel
     pub async fn add_request(&self, request_id: RequestId, sender: oneshot::Sender<Response>) {
         let mut map = self.map.write().await;
         map.insert(request_id, sender);
@@ -36,6 +39,11 @@ impl RequestMap {
     pub async fn contains_request(&self, request_id: &RequestId) -> bool {
         let map = self.map.read().await;
         map.contains_key(request_id)
+    }
+
+    pub async fn remove_request(&self, request_id: &RequestId) {
+        let mut map = self.map.write().await;
+        map.remove(request_id);
     }
 
     /// Clears all entries in the request map.
@@ -87,7 +95,7 @@ mod tests {
         );
         let receiver_node = NodeInfo::new(
             Key::new_random(),
-            SocketAddr::new("127.0.0.2".parse().unwrap(), 8081),
+            SocketAddr::new("127.0.0.1".parse().unwrap(), 8081),
         );
 
         let (sender, receiver) = oneshot::channel();

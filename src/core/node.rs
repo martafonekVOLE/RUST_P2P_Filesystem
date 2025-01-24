@@ -1,20 +1,18 @@
-use crate::config::ALPHA;
+use crate::config::LOOKUP_TIMEOUT_MILLISECONDS;
 use crate::core::incoming_request_handler::handle_received_request;
-use crate::core::key::{Key, KeyValue};
+use crate::core::key::Key;
+use crate::core::lookup::{LookupBuffer, LookupResponse};
 use crate::networking::message_dispatcher::MessageDispatcher;
 use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
 use futures::future::join_all;
-use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket as TokioUdpSocket;
-use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, RwLock};
 use tokio::task;
-use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
 pub struct Node {
@@ -26,29 +24,8 @@ pub struct Node {
     message_dispatcher: Arc<MessageDispatcher>,
 }
 
-struct LookupResult<'a> {
-    closest: KeyValue,
-    response: Vec<Result<Response, &'a str>>,
-}
-
-impl LookupResult<'_> {
-    pub fn get_closest(&self) -> KeyValue {
-        self.closest.clone()
-    }
-
-    pub fn get_response(&self) -> Vec<Result<Response, &str>> {
-        self.response.clone()
-    }
-}
-
 impl Node {
-    pub async fn new(
-        key: Key,
-        ip: String,
-        port: u16,
-        bucket_size: usize,
-        num_buckets: usize,
-    ) -> Self {
+    pub async fn new(key: Key, ip: String, port: u16) -> Self {
         let address = format!("{}:{}", ip, port).parse().expect("Invalid address");
         let socket = TokioUdpSocket::bind(address)
             .await
@@ -71,205 +48,191 @@ impl Node {
         NodeInfo::new(self.key, self.address)
     }
 
+    async fn send_request_and_wait(
+        &self,
+        request: Request,
+        timeout_milliseconds: u64,
+    ) -> Result<Response, &'static str> {
+        let request_id = request.request_id;
+
+        // Create a one-shot channel that will get the response from the receiving loop
+        let (sender, receiver) = oneshot::channel::<Response>();
+
+        // Record the request in the request map
+        self.request_map
+            .add_request(request.request_id, sender)
+            .await;
+
+        // Send message
+        if let Err(_send_err) = self.message_dispatcher.send_request(request).await {
+            return Err("Unable to send request via dispatcher.");
+        }
+
+        // Await the response from the channel, with given timeout.
+        match timeout(Duration::from_millis(timeout_milliseconds), receiver).await {
+            // Received something from the channel
+            Ok(Ok(response)) => Ok(response),
+            // The sender was dropped or otherwise no data came
+            Ok(Err(_)) => Err("No response received on the channel."),
+            // Timeout expired
+            Err(_) => {
+                // Remove the request from the map
+                self.request_map.remove_request(&request_id).await;
+                Err("Timed out awaiting response.")
+            }
+        }
+    }
+
     ///
     /// Sends a PING request to the specified node ID.
     /// Awaits a PONG response and returns whether the node is reachable.
     ///
     pub async fn ping(&self, node_id: Key) -> Result<Response, &str> {
-        // Get the address from RT
-        let receiver = match self.routing_table.read().await.get_nodeinfo(&node_id) {
-            Some(receiver) => receiver.clone(),
-            None => return Err("PING failed. Receiver could not be found in the routing table."),
+        // Get the address from the RoutingTable
+        let receiver_info = match self.routing_table.read().await.get_nodeinfo(&node_id) {
+            Some(info) => info.clone(),
+            None => return Err("PING failed. Node not in routing table."),
         };
 
-        // Create request
-        let request = Request::new(RequestType::Ping, self.to_node_info(), receiver);
+        let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
 
-        // Create comms channel
-        let (sender, receiver) = oneshot::channel::<Response>();
-
-        // Record request in the request map
-        self.request_map
-            .add_request(request.request_id, sender)
-            .await;
-
-        // Use message dispatcher send
-        let _dispatcher_response = match self.message_dispatcher.send_request(request).await {
-            Ok(response) => response,
-            Err(_) => return Err("PING failed. Unable to send request."),
-        };
-
-        match timeout(Duration::from_secs(10), receiver).await {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => Err("PING failed. Did not receive any response."),
-            Err(_) => Err("PING failed. Timed out."),
-        }
+        // Just call the send_request_and_wait method, it will return err if the request fails
+        self.send_request_and_wait(request, 10).await
     }
 
-    ///
-    /// Sends a FIND_NODE request to the specified node ID.
-    /// Awaits a response containing the closest nodes to the requested node ID.
-    ///
-    pub async fn find_node(&self, node_id: Key) -> Result<NodeInfo, &str> {
-        // If I know the node, I can immediately return the result
-        if let Some(node_info) = self.routing_table.read().await.get_nodeinfo(&node_id) {
-            return Ok(node_info.clone());
+    pub async fn find_node(&self, target: Key) -> Result<Vec<NodeInfo>, String> {
+        // Initial resolvers are the alpha closest nodes to the target in our RT
+        let initial_resolvers = self.routing_table.read().await.get_alpha_closest(&target)?;
+        if initial_resolvers.is_empty() {
+            return Err("No initial resolvers available for find_node resolutions".to_string());
         }
 
-        // Get all of my known nodes
-        let routing_table = self.routing_table.read().await;
-        let mut nodes = routing_table.get_all_nodeinfos();
+        // Inject the initial resolvers into the result buffer
+        let mut lookup_buffer = LookupBuffer::new(target.clone(), initial_resolvers);
 
         loop {
-            // If I have no more nodes to iterate over, the lookup ends without a success
-            // This is empty when Node does not have any other nodes in its RT or parsing found
-            // nodes did not return any new closer nodes.
-            if nodes.is_empty() {
-                return Err("FIND NODE failed. No nodes to lookup.");
+            // Get the resolvers for this
+            let resolvers = lookup_buffer.get_alpha_unqueried_nodes();
+            if resolvers.is_empty() {
+                break;
             }
 
-            // Pass the nodes to a method which will send a request to them
-            let lookup_result = self.lookup_through_nodes(nodes, node_id).await?;
-            let lookup_response = lookup_result.get_response();
-            let lookup_closest_node = lookup_result.closest;
+            // Get the responses from all resolvers in this round
+            let current_responses = self.lookup_round(target, resolvers).await;
 
-            let found_nodes =
-                Self::parse_found_nodes(lookup_response, lookup_closest_node, node_id);
-            if found_nodes.len() == 1 {
-                if let Some(looked_up_node) = found_nodes.get(&node_id) {
-                    return Ok(looked_up_node.clone());
+            // Record responses. If we didn't get any closer results, quit the rounds loop
+            if !lookup_buffer.record_lookup_round_responses(current_responses) {
+                break;
+            }
+        }
+
+        // Execute the last lookup on all the resulting nodes that haven't been queried yet
+        let last_lookup_responses = self
+            .lookup_round(target, lookup_buffer.get_unqueried_resulting_nodes())
+            .await;
+        lookup_buffer.record_lookup_round_responses(last_lookup_responses);
+
+        // Update RT with the responsive nodes
+        // TODO
+        // self.routing_table.write().await.store_nodeinfo(target);
+
+        // Render the final result
+        Ok(lookup_buffer.get_resulting_vector())
+    }
+
+    pub async fn join_network(&self, beacon_node: NodeInfo) -> Result<Vec<NodeInfo>, String> {
+        // Send single find_node to the beacon to get the initial k-closest nodes
+        let initial_k_closest = self
+            .single_lookup(self.key.clone(), beacon_node.clone())
+            .await
+            .get_k_closest();
+
+        if initial_k_closest.is_empty() {
+            return Err("Failed to join network. Beacon node did not respond.".to_string());
+        }
+
+        // Inject the initial resolvers into the result buffer
+        let mut result_buffer = LookupBuffer::new(self.key.clone(), initial_k_closest);
+
+        // Execute all lookup rounds
+        loop {
+            // Get the resolvers for the next round
+            let resolvers = result_buffer.get_alpha_unqueried_nodes();
+            if resolvers.is_empty() {
+                break;
+            }
+
+            // Get the responses from all resolvers in this round
+            let current_responses = self.lookup_round(self.key, resolvers).await;
+
+            // Record responses. If we didn't get any closer results, quit the rounds loop
+            if !result_buffer.record_lookup_round_responses(current_responses) {
+                break;
+            }
+        }
+
+        // Execute the last lookup on all the resulting nodes that haven't been queried yet
+        let last_lookup_responses = self
+            .lookup_round(self.key, result_buffer.get_unqueried_resulting_nodes())
+            .await;
+        result_buffer.record_lookup_round_responses(last_lookup_responses);
+
+        // TODO Store the responsive nodes in the routing table
+
+        // Render the final result
+        Ok(result_buffer.get_resulting_vector())
+    }
+
+    /// Perform a single lookup to the given resolver node.
+    /// This can be called individually, or used by lookup_round for parallel calls.
+    pub async fn single_lookup(&self, target: Key, resolver_node_info: NodeInfo) -> LookupResponse {
+        let request = Request::new(
+            RequestType::FindNode { node_id: target },
+            self.to_node_info(),
+            resolver_node_info.clone(),
+        );
+
+        // Send out the request, await the response and parse it
+        match self
+            .send_request_and_wait(request, LOOKUP_TIMEOUT_MILLISECONDS)
+            .await
+        {
+            // We received a response
+            Ok(response) => {
+                // If the response is a Nodes response, return a successful LookupResponse
+                if let ResponseType::Nodes { nodes } = response.response_type {
+                    LookupResponse::new_successful(resolver_node_info, nodes)
+                // Any other ResponseType is considered a failure
+                } else {
+                    LookupResponse::new_failed(resolver_node_info)
                 }
             }
-
-            if found_nodes.is_empty() {
-                return Err("FIND NODE failed. Could not found the node.");
-            }
-
-            nodes = found_nodes.values().cloned().collect();
+            // If the request times out, return a failed response
+            Err(_) => LookupResponse::new_failed(resolver_node_info),
         }
     }
 
+    /// Sends requests to all the resolvers in parallel and awaits them all at a timeout.
+    /// If the timeout is reached (per request), the returned `LookupResponse` is marked as false.
     ///
-    ///
-    ///
-    async fn lookup_through_nodes(
-        &self,
-        nodes: Vec<NodeInfo>,
-        node_id: Key,
-    ) -> Result<LookupResult, &str> {
-        let mut sorted_nodes = nodes.clone();
-        sorted_nodes.sort_by(|a: &NodeInfo, b: &NodeInfo| {
-            let dist_a = a.id.distance(&node_id);
-            let dist_b = b.id.distance(&node_id);
-            dist_a.cmp(&dist_b)
-        });
+    /// - If resolvers is empty, returns an empty Vec.
+    /// - Otherwise, spawns tasks for each resolver using `single_lookup`.
+    pub async fn lookup_round(&self, target: Key, resolvers: Vec<NodeInfo>) -> Vec<LookupResponse> {
+        if resolvers.is_empty() {
+            return Vec::new();
+        }
 
-        let closest_node = match sorted_nodes.first() {
-            Some(node) => node.id.distance(&node_id),
-            None => return Err("FIND NODE failed. Unable to update the closest node."), // todo maybe we should initiate?
-        };
-
-        // Based on this: https://www.syncfusion.com/succinctly-free-ebooks/kademlia-protocol-succinctly/node-lookup
-        // We only care about the initial (alpha closest) nodes
-        let (initial_nodes, other_nodes) = sorted_nodes.split_at(ALPHA);
-
-        // Initial alpha responses
-        let responses = join_all(
-            self.dispatch_find_nodes_async(initial_nodes.to_vec(), node_id)
-                .await,
-        )
-        .await;
-        let successful_responses: Vec<_> = responses
+        // For each resolver, create a future that calls single_lookup(...)
+        let tasks = resolvers
             .into_iter()
-            .filter_map(|response| response.ok())
-            .collect();
+            .map(|resolver_node_info| {
+                let t_clone = target.clone();
+                self.single_lookup(t_clone, resolver_node_info)
+            })
+            .collect::<Vec<_>>();
 
-        if successful_responses.is_empty() {
-            return Err("FIND NODES failed. All requests failed.");
-        };
-
-        Ok(LookupResult {
-            closest: closest_node,
-            response: successful_responses,
-        })
-    }
-
-    fn parse_found_nodes(
-        successful_responses: Vec<Result<Response, &str>>,
-        closest_node: KeyValue,
-        node_id: Key,
-    ) -> HashMap<Key, NodeInfo> {
-        let mut new_nodes: HashMap<Key, NodeInfo> = HashMap::new();
-
-        for response_result in successful_responses {
-            match response_result {
-                Ok(response) => {
-                    if let ResponseType::Nodes { nodes } = response.response_type {
-                        for node in nodes.iter().flatten() {
-                            // Found node, return
-                            if node.id == node_id {
-                                new_nodes.clear();
-                                new_nodes.insert(node.id.clone(), node.clone());
-                                return new_nodes;
-                            }
-
-                            // Found closer node, add to closer nodes
-                            if node.id.distance(&node_id) < closest_node {
-                                new_nodes.insert(node.id.clone(), node.clone());
-                            }
-                        }
-                    }
-                }
-                _ => continue,
-            }
-        }
-
-        new_nodes
-    }
-
-    async fn dispatch_find_nodes_async(
-        &self,
-        sorted_nodes: Vec<NodeInfo>,
-        node_id: Key,
-    ) -> Vec<JoinHandle<Result<Response, &str>>> {
-        let mut requests = vec![];
-
-        for node in sorted_nodes.iter() {
-            let request = Request::new(
-                RequestType::FindNode { node_id },
-                self.to_node_info(),
-                node.clone(),
-            );
-
-            let (sender, receiver) = oneshot::channel::<Response>();
-
-            self.request_map
-                .add_request(request.request_id, sender)
-                .await;
-
-            let messenger = self.message_dispatcher.clone();
-
-            let task = tokio::spawn(async move {
-                let _dispatcher_response = match messenger.send_request(request).await {
-                    Ok(response) => response,
-                    Err(_) => return Err("FIND NODE failed. Unable to send request."),
-                };
-
-                match timeout(Duration::from_secs(10), receiver).await {
-                    Ok(Ok(response)) => Ok(response),
-                    Ok(Err(_)) => Err("FIND NODE failed. Did not receive any response."),
-                    Err(_) => Err("FIND NODE failed. Timed out."),
-                }
-            });
-
-            requests.push(task);
-        }
-
-        requests
-    }
-
-    pub fn join_network() {
-        todo!()
+        // Run all lookups in parallel
+        join_all(tasks).await
     }
 
     ///
@@ -319,5 +282,57 @@ impl Node {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::networking::messages::{RequestType, ResponseType};
+    use tokio::net::UdpSocket;
+
+    #[tokio::test]
+    async fn test_ping_response() -> Result<(), Box<dyn std::error::Error>> {
+        let key = Key::new_random();
+        let node = Node::new(key.clone(), "127.0.0.1".to_string(), 8081).await;
+        let node_address = node.address;
+
+        // Start the listener so the node can receive requests.
+        node.start_listening();
+
+        // Create a Ping request from a separate ephemeral socket.
+        let ephemeral_socket = UdpSocket::bind("127.0.0.1:0").await?;
+        let sender_info = NodeInfo::new(Key::new_random(), ephemeral_socket.local_addr().unwrap());
+
+        // Create a Ping request
+        let ping_request = Request::new(
+            RequestType::Ping,
+            sender_info.clone(), // Sender
+            node.to_node_info(), // Receiver
+        );
+
+        // Send the Ping request to the node socket.
+        ephemeral_socket
+            .send_to(&ping_request.to_bytes(), node_address)
+            .await?;
+
+        // Wait for the nodes Pong response.
+        let mut buffer = [0u8; 1024];
+        let (size, _src) = timeout(
+            Duration::from_secs(2),
+            ephemeral_socket.recv_from(&mut buffer),
+        )
+        .await??;
+
+        // Parse the received data and verify it is a Pong response.
+        let response = serde_json::from_slice::<Response>(&buffer[..size])?;
+        assert_eq!(response.response_type, ResponseType::Pong);
+
+        // More assertions possible
+        assert_eq!(response.request_id, ping_request.request_id);
+        assert_eq!(response.receiver, sender_info);
+        assert_eq!(response.sender, node.to_node_info());
+
+        Ok(())
     }
 }
