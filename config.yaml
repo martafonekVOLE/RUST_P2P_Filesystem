@@ -2,3 +2,4 @@ beacon_node_address: "127.0.0.1:8080"
 node_port: 8081
 cache_file_path: "cache.json"
 storage_path: "/path/to/storage"
+ip_address: "local" # "public" or "loopback" or "local"

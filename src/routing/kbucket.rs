@@ -1,4 +1,4 @@
-use crate::config::K;
+use crate::constants::K;
 use crate::core::key::Key;
 use std::collections::VecDeque;
 

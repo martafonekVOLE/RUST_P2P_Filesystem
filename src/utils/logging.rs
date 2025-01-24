@@ -1,13 +1,7 @@
 use log::{debug, error, info, warn, LevelFilter};
 use std::env;
 
-pub fn init_logging(debug_mode: bool) {
-    let log_level = if debug_mode {
-        LevelFilter::Debug
-    } else {
-        LevelFilter::Info
-    };
-
+pub fn init_logging(log_level: LevelFilter) {
     env::set_var("RUST_LOG", format!("my_crate={}", log_level));
     env_logger::init();
 }
