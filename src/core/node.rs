@@ -48,6 +48,12 @@ impl Node {
         NodeInfo::new(self.key, self.address)
     }
 
+    ///
+    /// Sends a request to the specified node ID and awaits the response.
+    /// This method should always be used instead of calling send_request directly or manipulating
+    /// the request map directly.
+    /// The timeout should always be a global constant for specified action.
+    ///
     async fn send_request_and_wait(
         &self,
         request: Request,
@@ -100,6 +106,11 @@ impl Node {
         self.send_request_and_wait(request, 10).await
     }
 
+    ///
+    /// Attempts to find the closest K nodes in the entire network with respect to the target key.
+    /// This method can only be used if the node is already part of the network. (the node already
+    /// successfully underwent the join_network procedure)
+    ///
     pub async fn find_node(&self, target: Key) -> Result<Vec<NodeInfo>, String> {
         // Initial resolvers are the alpha closest nodes to the target in our RT
         let initial_resolvers = self.routing_table.read().await.get_alpha_closest(&target)?;
@@ -140,6 +151,12 @@ impl Node {
         Ok(lookup_buffer.get_resulting_vector())
     }
 
+    ///
+    /// Performs the join network procedure to join an existing network.
+    /// This method returns Err if the beacon node does not respond.
+    /// After successfully joining the network, the responsive nodes are stored in the routing table
+    /// and the Node is ready to participate in the network.
+    ///
     pub async fn join_network(&self, beacon_node: NodeInfo) -> Result<Vec<NodeInfo>, String> {
         // Send single find_node to the beacon to get the initial k-closest nodes
         let initial_k_closest = self
@@ -183,8 +200,10 @@ impl Node {
         Ok(result_buffer.get_resulting_vector())
     }
 
+    ///
     /// Perform a single lookup to the given resolver node.
     /// This can be called individually, or used by lookup_round for parallel calls.
+    ///
     pub async fn single_lookup(&self, target: Key, resolver_node_info: NodeInfo) -> LookupResponse {
         let request = Request::new(
             RequestType::FindNode { node_id: target },
@@ -212,11 +231,13 @@ impl Node {
         }
     }
 
+    ///
     /// Sends requests to all the resolvers in parallel and awaits them all at a timeout.
     /// If the timeout is reached (per request), the returned `LookupResponse` is marked as false.
     ///
     /// - If resolvers is empty, returns an empty Vec.
     /// - Otherwise, spawns tasks for each resolver using `single_lookup`.
+    ///
     pub async fn lookup_round(&self, target: Key, resolvers: Vec<NodeInfo>) -> Vec<LookupResponse> {
         if resolvers.is_empty() {
             return Vec::new();

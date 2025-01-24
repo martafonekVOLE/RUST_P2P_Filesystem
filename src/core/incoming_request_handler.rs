@@ -103,7 +103,6 @@ async fn handle_find_node_message(
 
 ///
 /// Updates the routing table with the given node's information.
-/// TODO This method should belong to the RoutingTable struct.
 ///
 async fn record_possible_neighbour(routing_table: Arc<RwLock<RoutingTable>>, node: &NodeInfo) {
     let mut routing_table = routing_table.write().await;
