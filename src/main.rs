@@ -44,7 +44,7 @@ async fn main() {
     println!("Resolved IP address: {}", ip);
 
     // Create node
-    let node = Node::new(Key::new_random(), ip.to_string(), config.node_port).await;
+    let node = Node::new(Key::new_random(), ip.to_string(), config.node_port, config.storage_path).await;
 
     // Begin listening for incoming network traffic
     node.start_listening();

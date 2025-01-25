@@ -37,6 +37,7 @@ impl<'de> Deserialize<'de> for IpAddress {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
+    ///
     pub beacon_node_address: String,
     pub node_port: u16,
     pub cache_file_path: String,

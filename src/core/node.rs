@@ -7,6 +7,7 @@ use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
+use crate::storage::storage_table::StorageTable;
 use futures::future::join_all;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use tokio::net::UdpSocket as TokioUdpSocket;
 use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
+use crate::storage::storage_manager::StorageManager;
 
 pub struct Node {
     key: Key,
@@ -22,10 +24,11 @@ pub struct Node {
     routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
     message_dispatcher: Arc<MessageDispatcher>,
+    storage_manager: StorageManager,
 }
 
 impl Node {
-    pub async fn new(key: Key, ip: String, port: u16) -> Self {
+    pub async fn new(key: Key, ip: String, port: u16, storage_path: String) -> Self {
         let address = format!("{}:{}", ip, port).parse().expect("Invalid address");
         let socket = TokioUdpSocket::bind(address)
             .await
@@ -38,6 +41,7 @@ impl Node {
             routing_table: Arc::new(RwLock::new(RoutingTable::new(key))),
             request_map: RequestMap::new(),
             message_dispatcher: Arc::new(MessageDispatcher::new().await),
+            storage_manager: StorageManager::new(storage_path)
         }
     }
 
@@ -288,7 +292,7 @@ impl Node {
                             let routing_table = Arc::clone(&routing_table);
                             let message_dispatcher = Arc::clone(&message_dispatcher);
                             task::spawn(async move {
-                                handle_received_request(request, routing_table, message_dispatcher)
+                                handle_received_request(request, routing_table, message_dispatcher, &self.storage_manager)
                                     .await;
                             });
                         // Invalid incoming message
@@ -315,7 +319,7 @@ mod tests {
     #[tokio::test]
     async fn test_ping_response() -> Result<(), Box<dyn std::error::Error>> {
         let key = Key::new_random();
-        let node = Node::new(key.clone(), "127.0.0.1".to_string(), 8081).await;
+        let node = Node::new(key.clone(), "127.0.0.1".to_string(), 8081, "temp").await;
         let node_address = node.address;
 
         // Start the listener so the node can receive requests.

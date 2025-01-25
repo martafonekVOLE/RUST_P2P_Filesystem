@@ -13,12 +13,15 @@ pub type RequestId = Uuid; // TODO make a custom strut, abstract away implementa
 pub enum RequestType {
     Ping,
     FindNode { node_id: Key },
+    Store,
+    StoreData { key: Key, data: Vec<u8> },
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum ResponseType {
     Pong,
     Nodes { nodes: Vec<NodeInfo> },
+    StoreOk { port: u16 },
 }
 
 impl ResponseType {

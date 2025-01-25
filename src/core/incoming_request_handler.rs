@@ -3,8 +3,14 @@ use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
 use crate::routing::routing_table::RoutingTable;
 use crate::utils::logging::{log_error, log_warn};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use tokio::net::TcpListener;
+use tokio::sync::{oneshot, RwLock};
+use tokio::time::Instant;
+use crate::storage::storage_manager::StorageManager;
+use crate::config::Config;
 
 ///
 /// Handles incoming requests.
@@ -13,6 +19,7 @@ pub async fn handle_received_request(
     request: Request,
     routing_table: Arc<RwLock<RoutingTable>>,
     message_dispatcher: Arc<MessageDispatcher>,
+    storage_manager: &StorageManager,
 ) {
     match request.request_type {
         RequestType::Ping => {
@@ -20,6 +27,12 @@ pub async fn handle_received_request(
         }
         RequestType::FindNode { node_id } => {
             handle_find_node_message(request, node_id, routing_table, message_dispatcher).await;
+        }
+        RequestType::Store => {
+            handle_store_request(request, message_dispatcher, storage_manager)
+        }
+        _ => {
+            todo!()
         }
     }
 }
@@ -107,4 +120,63 @@ async fn handle_find_node_message(
 async fn record_possible_neighbour(routing_table: Arc<RwLock<RoutingTable>>, node: &NodeInfo) {
     let mut routing_table = routing_table.write().await;
     routing_table.store_nodeinfo(node.clone());
+}
+
+async fn handle_store_request(request: Request, message_dispatcher: Arc<MessageDispatcher>, storage_manager: &StorageManager){
+    let (sender, receiver) = oneshot::channel::<Request>();
+
+    // Get free port
+    // todo refactor
+    let free_port = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+    let sender = request.sender.clone();
+    let receiver = request.receiver;
+
+    let response = Response::new(
+        ResponseType::StoreOk { port },
+        sender,
+        receiver,
+        request.request_id
+    );
+
+    if let Err(e) = message_dispatcher.send_response(response).await {
+        log_error(&format!("Failed to send STORE OK: {}", e));
+    }
+
+    thread::spawn(async move || {
+        let listener = TcpListener::bind(format!("0.0.0.0:{}", free_port)).await.expect("Unable to open TCP Listener.");
+
+        // Fail after this duration, if no device communicates
+        let timeout = Duration::from_secs(10);
+        let start = Instant::now();
+
+        loop {
+            if start.elapsed() > timeout {
+                // handle timeout
+            }
+
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let mut buffer = Vec::new();
+                    stream.read_to_end(&mut buffer).unwrap();
+
+                    // parse data
+                    let request = Request::from_bytes(buffer);
+
+                    // handle data
+                }
+                Err(e) => {
+                    todo!()
+                }
+            }
+
+        }
+    });
+
+
+}
+
+async fn handle_received_data(storage_manager: &StorageManager, request: Request) {
+    // todo -> handle request data
+
+    // Storage manager -> store
 }
