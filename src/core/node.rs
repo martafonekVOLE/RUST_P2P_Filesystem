@@ -103,7 +103,8 @@ impl Node {
         let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
 
         // Just call the send_request_and_wait method, it will return err if the request fails
-        self.send_request_and_wait(request, 10).await
+        self.send_request_and_wait(request, LOOKUP_TIMEOUT_MILLISECONDS)
+            .await
     }
 
     ///

@@ -62,7 +62,17 @@ async fn main() {
             "ping" if parts.len() == 2 => match Key::from_hex_str(parts[1]) {
                 Ok(node_id) => {
                     let reachable = node.ping(node_id).await;
-                    println!("Node {} is reachable: {}", parts[1], reachable);
+                    match reachable {
+                        Ok(reachable) => {
+                            println!(
+                                "Node {} is reachable: {}",
+                                parts[1], reachable.response_type
+                            );
+                        }
+                        _ => {
+                            println!("Node {} is unreachable.", parts[1]);
+                        }
+                    }
                 }
                 Err(e) => {
                     println!("Invalid node ID: {}", e);

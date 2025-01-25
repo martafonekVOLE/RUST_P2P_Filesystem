@@ -2,6 +2,7 @@ use crate::constants::K;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -34,6 +35,24 @@ impl ResponseType {
         match self {
             ResponseType::Nodes { nodes } => Ok(nodes),
             _ => Err("Attempted to convert wrong response type - expected Nodes"),
+        }
+    }
+}
+
+impl fmt::Display for ResponseType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResponseType::Pong => write!(f, "Pong"),
+            ResponseType::Nodes { nodes } => {
+                write!(f, "Nodes: [")?;
+                for (i, node) in nodes.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", node)?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }

@@ -3,6 +3,12 @@ use serde::{Deserialize, Deserializer};
 use std::fmt;
 use std::net::IpAddr;
 
+pub const LOOKUP_TIMEOUT_MILLISECONDS: u64 = 10;
+
+pub const ALPHA: usize = 3;
+
+pub const K: usize = 3;
+
 #[derive(Debug)]
 pub enum IpAddress {
     Public,
