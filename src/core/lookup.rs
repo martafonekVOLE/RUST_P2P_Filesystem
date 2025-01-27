@@ -1,4 +1,4 @@
-use crate::config::{ALPHA, K};
+use crate::constants::{ALPHA, K};
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
 
@@ -176,7 +176,7 @@ impl LookupBuffer {
             .collect()
     }
 
-    fn get_responsive_nodes(&self) -> Vec<NodeInfo> {
+    pub(crate) fn get_responsive_nodes(&self) -> Vec<NodeInfo> {
         self.nodes
             .iter()
             .filter(|node| node.queried && node.responded)

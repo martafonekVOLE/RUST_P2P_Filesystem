@@ -2,6 +2,7 @@ use crate::constants::K;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -15,10 +16,30 @@ pub enum RequestType {
     FindNode { node_id: Key },
 }
 
+impl Display for RequestType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RequestType::Ping => write!(f, "Ping"),
+            RequestType::FindNode { node_id } => write!(f, "FindNode({})", node_id),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum ResponseType {
     Pong,
     Nodes { nodes: Vec<NodeInfo> },
+}
+
+impl Display for ResponseType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResponseType::Pong => write!(f, "Pong"),
+            ResponseType::Nodes { nodes } => {
+                write!(f, "Nodes({})", nodes.len())
+            }
+        }
+    }
 }
 
 impl ResponseType {
@@ -119,12 +140,24 @@ impl Response {
     }
 }
 
-pub fn parse_request(message: &[u8]) -> Result<Request, MessageError> {
-    Request::from_bytes(message)
+impl Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} [{}] {} -> {}",
+            self.response_type, self.request_id, self.sender.id, self.receiver.id
+        )
+    }
 }
 
-pub fn parse_response(message: &[u8]) -> Result<Response, MessageError> {
-    Response::from_bytes(message)
+impl Display for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} [{}] {} -> {}",
+            self.request_type, self.request_id, self.sender.id, self.receiver.id
+        )
+    }
 }
 
 #[cfg(test)]

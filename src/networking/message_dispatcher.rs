@@ -1,4 +1,5 @@
 use crate::networking::messages::{Request, Response};
+use log::info;
 use serde_json;
 use std::io::Error;
 use tokio::net::UdpSocket;
@@ -31,9 +32,12 @@ impl MessageDispatcher {
         let serialized_request =
             serde_json::to_vec(&request).expect("Failed to serialize request type");
         let socket = self.socket.lock().await;
-        socket
+        let len = socket
             .send_to(&serialized_request, request.receiver.address)
-            .await
+            .await?;
+
+        info!("Sent request: {}", request);
+        Ok(len)
     }
 
     ///
@@ -44,8 +48,11 @@ impl MessageDispatcher {
         let serialized_response =
             serde_json::to_vec(&response).expect("Failed to serialize response type");
         let socket = self.socket.lock().await;
-        socket
+        let len = socket
             .send_to(&serialized_response, response.receiver.address)
-            .await
+            .await?;
+
+        info!("Sent response: {}", response);
+        Ok(len)
     }
 }

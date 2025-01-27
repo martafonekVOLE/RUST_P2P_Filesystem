@@ -1,4 +1,5 @@
-use crate::config::LOOKUP_TIMEOUT_MILLISECONDS;
+use crate::constants::LOOKUP_TIMEOUT_MILLISECONDS;
+use crate::constants::PING_TIMEOUT_MILLISECONDS;
 use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
 use crate::core::lookup::{LookupBuffer, LookupResponse};
@@ -8,6 +9,7 @@ use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
 use futures::future::join_all;
+use log::info;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket as TokioUdpSocket;
@@ -16,8 +18,8 @@ use tokio::task;
 use tokio::time::{timeout, Duration};
 
 pub struct Node {
-    key: Key,
-    address: SocketAddr,
+    pub(crate) key: Key,
+    pub(crate) address: SocketAddr,
     socket: Arc<TokioUdpSocket>, // Use Tokio's UdpSocket for async I/O
     routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
@@ -26,14 +28,16 @@ pub struct Node {
 
 impl Node {
     pub async fn new(key: Key, ip: String, port: u16) -> Self {
-        let address = format!("{}:{}", ip, port).parse().expect("Invalid address");
+        let address: SocketAddr = format!("{}:{}", ip, port).parse().expect("Invalid address");
         let socket = TokioUdpSocket::bind(address)
             .await
             .expect("Failed to bind socket");
-
+        let resolved_address = socket
+            .local_addr()
+            .expect("Failed to get local socket address");
         Node {
             key,
-            address,
+            address: resolved_address,
             socket: Arc::new(socket),
             routing_table: Arc::new(RwLock::new(RoutingTable::new(key))),
             request_map: RequestMap::new(),
@@ -103,7 +107,8 @@ impl Node {
         let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
 
         // Just call the send_request_and_wait method, it will return err if the request fails
-        self.send_request_and_wait(request, 10).await
+        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+            .await
     }
 
     ///
@@ -143,9 +148,11 @@ impl Node {
             .await;
         lookup_buffer.record_lookup_round_responses(last_lookup_responses);
 
-        // Update RT with the responsive nodes
-        // TODO
-        // self.routing_table.write().await.store_nodeinfo(target);
+        // Update routing table with the responsive nodes
+        let mut routing_table = self.routing_table.write().await;
+        for node_info in lookup_buffer.get_responsive_nodes() {
+            routing_table.store_nodeinfo(node_info);
+        }
 
         // Render the final result
         Ok(lookup_buffer.get_resulting_vector())
@@ -158,6 +165,14 @@ impl Node {
     /// and the Node is ready to participate in the network.
     ///
     pub async fn join_network(&self, beacon_node: NodeInfo) -> Result<Vec<NodeInfo>, String> {
+        self.routing_table
+            .write()
+            .await
+            .store_nodeinfo(beacon_node.clone());
+
+        info!("Joining network with beacon node: {}", beacon_node.id);
+        self.ping(beacon_node.id).await?;
+
         // Send single find_node to the beacon to get the initial k-closest nodes
         let initial_k_closest = self
             .single_lookup(self.key.clone(), beacon_node.clone())
@@ -169,12 +184,12 @@ impl Node {
         }
 
         // Inject the initial resolvers into the result buffer
-        let mut result_buffer = LookupBuffer::new(self.key.clone(), initial_k_closest);
+        let mut lookup_buffer = LookupBuffer::new(self.key.clone(), initial_k_closest);
 
         // Execute all lookup rounds
         loop {
             // Get the resolvers for the next round
-            let resolvers = result_buffer.get_alpha_unqueried_nodes();
+            let resolvers = lookup_buffer.get_alpha_unqueried_nodes();
             if resolvers.is_empty() {
                 break;
             }
@@ -183,21 +198,25 @@ impl Node {
             let current_responses = self.lookup_round(self.key, resolvers).await;
 
             // Record responses. If we didn't get any closer results, quit the rounds loop
-            if !result_buffer.record_lookup_round_responses(current_responses) {
+            if !lookup_buffer.record_lookup_round_responses(current_responses) {
                 break;
             }
         }
 
         // Execute the last lookup on all the resulting nodes that haven't been queried yet
         let last_lookup_responses = self
-            .lookup_round(self.key, result_buffer.get_unqueried_resulting_nodes())
+            .lookup_round(self.key, lookup_buffer.get_unqueried_resulting_nodes())
             .await;
-        result_buffer.record_lookup_round_responses(last_lookup_responses);
+        lookup_buffer.record_lookup_round_responses(last_lookup_responses);
 
-        // TODO Store the responsive nodes in the routing table
+        // Update routing table with the responsive nodes
+        let mut routing_table = self.routing_table.write().await;
+        for node_info in lookup_buffer.get_responsive_nodes() {
+            routing_table.store_nodeinfo(node_info);
+        }
 
         // Render the final result
-        Ok(result_buffer.get_resulting_vector())
+        Ok(lookup_buffer.get_resulting_vector())
     }
 
     ///
@@ -267,6 +286,7 @@ impl Node {
         let routing_table = Arc::clone(&self.routing_table);
         let request_map = self.request_map.clone();
         let message_dispatcher = Arc::clone(&self.message_dispatcher);
+        let this_node_info = self.to_node_info();
 
         // Spawn an indefinitely looping async task to listen for incoming messages
         task::spawn(async move {
@@ -287,9 +307,15 @@ impl Node {
                         } else if let Ok(request) = serde_json::from_slice::<Request>(data) {
                             let routing_table = Arc::clone(&routing_table);
                             let message_dispatcher = Arc::clone(&message_dispatcher);
+                            let this_node_info = this_node_info.clone();
                             task::spawn(async move {
-                                handle_received_request(request, routing_table, message_dispatcher)
-                                    .await;
+                                handle_received_request(
+                                    this_node_info,
+                                    request,
+                                    routing_table,
+                                    message_dispatcher,
+                                )
+                                .await;
                             });
                         // Invalid incoming message
                         } else {

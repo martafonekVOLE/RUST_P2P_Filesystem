@@ -1,7 +1,7 @@
 // request_map.rs
 use crate::networking::messages::RequestId;
 use crate::networking::messages::Response;
-use crate::utils::logging::{log_error, log_warn};
+use log::{error, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
@@ -61,17 +61,19 @@ impl RequestMap {
     pub async fn handle_response(&self, response: Response) {
         let request_id = response.request_id;
 
-        // TODO check if the request ID is valid is present?
+        // Check if the incoming response matches a pending request
+        if !self.contains_request(&response.request_id).await {
+            warn!("Received response with unknown request ID {}", request_id);
+            return;
+        }
 
+        // Remove the request from the map and send the response to the corresponding oneshot
         if let Some(sender) = self.take_request(&request_id).await {
             if sender.send(response).is_err() {
-                log_error(&format!("Failed to resolve request with ID {}", request_id));
+                error!("Failed to resolve request with ID {}", request_id);
             }
         } else {
-            log_warn(&format!(
-                "Received response with unknown request ID {}",
-                request_id
-            ));
+            warn!("Received response with unknown request ID {}", request_id);
         }
     }
 }
