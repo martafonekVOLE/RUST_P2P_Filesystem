@@ -1,6 +1,23 @@
-# Milestone 1 :
+# How to run
 
-## Theory, project description
+1) Start the initial beacon node:
+
+```cargo run -- --config config_beacon.yaml --skip-join ```
+
+2) Update the config.yaml with the beacon node's address and key
+
+
+3) Connect as many other nodes as you want:
+
+```cargo run -- --config config.yaml ```
+
+___
+___
+
+# Theory 
+## Milestone 1 :
+
+### Theory, project description
 
 Before we focus on anything related to files, we need to get the basics down, so thats what the first milestone should
 be about.
@@ -38,7 +55,7 @@ environment, so we can monitor the bottlenecks and failure points of the network
 where
 this framework will also be used.
 
-## Goals outline for MS1
+### Goals outline for MS1
 
 - Have a network of nodes that can ping each other
 - Be able to add a node to the network
@@ -48,7 +65,7 @@ this framework will also be used.
 - Have a CLI that can start, check status, kill and disconnect nodes
 - Prepare a sort of testing/simulation framework to run nodes on localhost
 
-## Time plan and organization
+### Time plan and organization
 
 A weekly online meeting should be held to discuss the progress and the next steps. The meeting should be held on the
 start of the weekend so that we have enough time to get something done with the new information from each other.
@@ -61,9 +78,9 @@ their own 3-week sprint cycle - in the optimal case :D...
 
 ---
 
-# Milestone 2 :
+## Milestone 2 :
 
-## Goals outline for MS2
+### Goals outline for MS2
 
 - Implement TCP data transfer
 - Have a complete and tested communication interface with implement the `STORE` and `FIND_VALUE` messages.
@@ -73,7 +90,7 @@ their own 3-week sprint cycle - in the optimal case :D...
 - Introduce file shard encryption.
 - Follow the suggested communication outline
 
-## Time plan and organization
+### Time plan and organization
 An online meeting should be held twice a week to discuss the progress and the next
 steps. 
 
