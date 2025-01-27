@@ -1,7 +1,8 @@
 # beacon variables can be omitted if running with --skip-join flag
-beacon_node_address: "127.0.0.1:8081" 
-beacon_node_key: b6c9baed
-# node_port: 8083 - not necessary, random port gets chosen when this is missing
+beacon_node_address: "127.0.0.1:8081"
+beacon_node_key: key # Must be K bytes, (K*2 hex characters)
+# explicit node port can be omitted, in that case an ephemeral port will be used
+node_port: 8081
 cache_file_path: "cache.json"
-storage_path: "/Users/evilhands/Documents/W24/Rust/rust-p2p/p2p_storage"
-ip_address_type: "loopback" # "public" or "loopback" or "local"
+storage_path: "/path/to/storage"
+ip_address: "local" # "public" or "loopback" or "local"
