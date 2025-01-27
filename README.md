@@ -1,6 +1,6 @@
 # Milestone 1 :
 
-## Theory, project descrition and goals for MS1
+## Theory, project description
 
 Before we focus on anything related to files, we need to get the basics down, so thats what the first milestone should
 be about.
@@ -20,7 +20,7 @@ routing table, to see if they are still online. If they are not, they will be re
 should
 be enough for the network to be able to function properly in this iteration.
 
-Each node that has succesfully passed the initial setup will be able to send messages to other nodes. The messages
+Each node that has successfully passed the initial setup will be able to send messages to other nodes. The messages
 will be of type `PING`, `STORE`, `FIND_NODE` and `FIND_VALUE`. For this milestone, we will only focus on the `PING`
 and `FIND_NODE` messages. The `PING` message is used to check if a node is still online and is issued only to nodes
 known by their actual IP and port. The `FIND_NODE` message is used to find a node in the network, given its Key.
@@ -56,3 +56,25 @@ start of the weekend so that we have enough time to get something done with the 
 Since we only have a little over two months for this project, a 3-week sprint cycle should be adopted. This means that
 we will have 3 weeks to complete the tasks outlined above. After that, two more milestones will be created, each with
 their own 3-week sprint cycle - in the optimal case :D...
+
+---
+
+---
+
+# Milestone 2 :
+
+## Goals outline for MS2
+
+- Implement TCP data transfer
+- Have a complete and tested communication interface with implement the `STORE` and `FIND_VALUE` messages.
+- Implement a custom family of `STORE` messages. 
+- Setup active and passive data managers.
+- Introduce file sharding.
+- Introduce file shard encryption.
+- Follow the suggested communication outline
+
+## Time plan and organization
+An online meeting should be held twice a week to discuss the progress and the next
+steps. 
+
+Since we only have a little over two weeks for this project, we have set an internal deadline to **February 7th**.
