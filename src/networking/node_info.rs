@@ -1,6 +1,6 @@
 use crate::core::key::Key;
-use crate::core::key::KeyValue;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::net::SocketAddr;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -34,5 +34,11 @@ impl NodeInfo {
         let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("Failed to bind to address");
         let address = socket.local_addr().expect("Failed to get local address");
         NodeInfo { id, address }
+    }
+}
+
+impl Display for NodeInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} @ {}", self.id, self.address)
     }
 }

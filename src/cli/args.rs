@@ -15,6 +15,15 @@ pub struct Arguments {
     #[arg(short, long)]
     /// Log info about the ongoing communication to stdout. (For debugging purposes).
     pub verbose: bool,
+
+    #[arg(short, long)]
+    /// Run without beacon node.
+    pub skip_join: bool,
+
+    #[arg(short, long)]
+    /// The port to run the node on. If not provided, a random port will be chosen. This overrides
+    /// the port specified in the config file.
+    pub port: Option<u16>,
 }
 
 /*

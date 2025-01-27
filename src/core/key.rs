@@ -1,9 +1,10 @@
 use crate::constants::K;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha1::{Digest, Sha1};
 use std::cmp::Ordering;
 use std::fmt;
+use std::fmt::LowerHex;
 
 /// Represents an error that can occur when constructing or parsing a Key.
 #[derive(Debug)]
@@ -38,7 +39,7 @@ impl std::error::Error for KeyError {}
 pub type KeyValue = [u8; K];
 
 /// A key representing a 160-bit identifier, suitable for Kademlia-like overlays.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct Key {
     value: KeyValue,
 }
@@ -92,6 +93,10 @@ impl Key {
         Key { value }
     }
 
+    pub fn to_hex_string(&self) -> String {
+        format!("{:x}", self)
+    }
+
     /// Returns the XOR distance between `self` and `other` as a byte array.
     pub fn distance(&self, other: &Key) -> KeyValue {
         let mut distance: KeyValue = [0u8; K];
@@ -143,6 +148,38 @@ impl Ord for Key {
 impl PartialOrd for Key {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+// Implementing LowerHex for Key allows us to use the `{:x}` format specifier, which outputs
+// the key as a lowercase hexadecimal string.
+impl LowerHex for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in &self.value {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
+}
+
+// Custom deserialization for Key
+impl<'de> Deserialize<'de> for Key {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let hex_str = String::deserialize(deserializer)?;
+        Key::from_hex_str(&hex_str).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for Key {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let hex_string = self.to_hex_string();
+        serializer.serialize_str(&hex_string)
     }
 }
 

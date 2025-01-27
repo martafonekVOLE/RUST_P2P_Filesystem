@@ -1,5 +1,5 @@
 use super::kbucket::KBucket;
-use crate::config::{ALPHA, K};
+use crate::constants::{ALPHA, K};
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
 
