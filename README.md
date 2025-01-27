@@ -15,27 +15,9 @@ ___
 ___
 
 # Theory 
-## Milestone 1 :
+## Milestone 1:
 
 ### Theory, project description
-
-Before we focus on anything related to files, we need to get the basics down, so thats what the first milestone should
-be about.
-This means we will have a network where
-nodes can join, resolve another nodes IP and port given its Key (key is the id for both nodes and later the files)
-and send some default ping+response messages to each other, even without knowing each other's IP.
-
-Each node will first need to contact a beacon node - such that has a public ip and port, and is online 24/7. This
-will still use the default implementation though. Once a new node is created, it will contact the beacon node and
-get a list of nodes to contact. It will then contact these nodes and get a list of nodes from them, and so on, based on
-the freshly generated key of this new node. This is done to populate the routing table of the new node.
-
-Once the new node has a somewhat populated routing table (it will never be full, but it will have *enough* nodes
-for startup in it), it will start to listen for incoming connections and requests. It will also start to ping the nodes
-in its
-routing table, to see if they are still online. If they are not, they will be removed from the routing table. This
-should
-be enough for the network to be able to function properly in this iteration.
 
 Each node that has successfully passed the initial setup will be able to send messages to other nodes. The messages
 will be of type `PING`, `STORE`, `FIND_NODE` and `FIND_VALUE`. For this milestone, we will only focus on the `PING`
