@@ -17,6 +17,8 @@ use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
 
+use std::error::Error;
+
 pub struct Node {
     pub(crate) key: Key,
     pub(crate) address: SocketAddr,
@@ -97,11 +99,11 @@ impl Node {
     /// Sends a PING request to the specified node ID.
     /// Awaits a PONG response and returns whether the node is reachable.
     ///
-    pub async fn ping(&self, node_id: Key) -> Result<Response, &str> {
+    pub async fn ping(&self, node_id: Key) -> Result<Response, Box<dyn Error>> {
         // Get the address from the RoutingTable
-        let receiver_info = match self.routing_table.read().await.get_nodeinfo(&node_id) {
+        let receiver_info = match self.routing_table.read().await.get_nodeinfo(&node_id)? {
             Some(info) => info.clone(),
-            None => return Err("PING failed. Node not in routing table."),
+            None => return Err("PING failed. Node not in routing table.".into()),
         };
 
         let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
@@ -109,6 +111,7 @@ impl Node {
         // Just call the send_request_and_wait method, it will return err if the request fails
         self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
             .await
+            .map_err(|e| e.into())
     }
 
     ///
@@ -168,14 +171,15 @@ impl Node {
         self.routing_table
             .write()
             .await
-            .store_nodeinfo(beacon_node.clone());
+            .store_nodeinfo(beacon_node.clone())
+            .expect("Failed to add beacon node to RT");
 
         info!("Joining network with beacon node: {}", beacon_node.id);
-        self.ping(beacon_node.id).await?;
+        self.ping(beacon_node.id).await.map_err(|e| e.to_string())?;
 
         // Send single find_node to the beacon to get the initial k-closest nodes
         let initial_k_closest = self
-            .single_lookup(self.key.clone(), beacon_node.clone())
+            .single_lookup(self.key, beacon_node.clone())
             .await
             .get_k_closest();
 
@@ -184,7 +188,7 @@ impl Node {
         }
 
         // Inject the initial resolvers into the result buffer
-        let mut lookup_buffer = LookupBuffer::new(self.key.clone(), initial_k_closest);
+        let mut lookup_buffer = LookupBuffer::new(self.key, initial_k_closest);
 
         // Execute all lookup rounds
         loop {
@@ -212,7 +216,7 @@ impl Node {
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
         for node_info in lookup_buffer.get_responsive_nodes() {
-            routing_table.store_nodeinfo(node_info);
+            routing_table.store_nodeinfo(node_info).unwrap();
         }
 
         // Render the final result

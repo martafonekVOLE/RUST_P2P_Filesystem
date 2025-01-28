@@ -106,9 +106,8 @@ impl Key {
         distance
     }
 
-    /// Counts the number of leading zero bits in the XOR distance
-    /// between `self` and `other`.
-    pub fn leading_zeros(&self, other: &Key) -> usize {
+    /// Count the number of leading zeros in the XOR distance
+    pub fn leading_zeros_in_distance(&self, other: &Key) -> usize {
         let distance = self.distance(other);
         let mut count = 0;
         for byte in &distance {
@@ -127,6 +126,40 @@ impl Key {
     /// Returns a copy of the underlying 20-byte array as a `Vec<u8>`.
     pub fn to_bytes(&self) -> Vec<u8> {
         self.value.to_vec()
+    }
+
+    /// For testing purposes in Routing Table
+    pub fn make_exactly_n_same_leading_bits_as(&mut self, key: &Key, mut n_bits: usize) {
+        // Copy first n bits from
+        let mut byte_i: usize = 0;
+        for _ in 0..K {
+            if n_bits >= 8 {
+                self.value[byte_i] = key.value[byte_i];
+                n_bits -= 8;
+                byte_i += 1;
+            } else {
+                let my_byte = &mut self.value[byte_i];
+                let your_byte = key.value[byte_i];
+                let mut mask: u8 = 0;
+                for bit_i in 0..n_bits {
+                    mask |= 1u8 << (7 - bit_i);
+                }
+                *my_byte = mask & your_byte | *my_byte & !mask;
+                assert!(n_bits < 8);
+            }
+        }
+
+        // To make sure exactly same num leading bits, not more, need to set next bit to inverse of target
+        if byte_i < K {
+            let offset_in_byte: usize = n_bits; // byte_i already incremented!
+            assert!(offset_in_byte <= 7);
+
+            // reverse shift because counting from left
+            let mask = 1u8 << (7 - offset_in_byte);
+            let your_byte = key.value[byte_i];
+            let your_bit_neg = mask & !your_byte;
+            self.value[byte_i] = your_bit_neg | self.value[byte_i] & !mask;
+        }
     }
 }
 
@@ -265,7 +298,7 @@ mod tests {
         );
 
         // Calculate the number of leading zeros
-        let lz = k1.leading_zeros(&k2);
+        let lz = k1.leading_zeros_in_distance(&k2);
         assert_eq!(lz, 0, "Distance of all 0xFF bytes has 0 leading zeros");
     }
 
