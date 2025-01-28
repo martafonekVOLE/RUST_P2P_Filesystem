@@ -1,5 +1,5 @@
 use super::kbucket::*;
-use crate::config::{ALPHA, K};
+use crate::constants::{ALPHA, K};
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
 
@@ -173,45 +173,12 @@ impl RoutingTable {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use crate::config::K;
+    use crate::constants::K;
     use crate::core::key::Key;
     use crate::networking::node_info::NodeInfo;
     use crate::routing::routing_table::*;
 
-    impl Key {
-        fn make_n_same_leading_bits_as(&mut self, key: &Key, mut n_bits: usize) {
-            // Copy first n bits from
-            let mut byte_i: usize = 0;
-            for _ in 0..K {
-                if n_bits >= 8 {
-                    self.value[byte_i] = key.value[byte_i];
-                    n_bits -= 8;
-                    byte_i += 1;
-                } else {
-                    let my_byte = &mut self.value[byte_i];
-                    let your_byte = key.value[byte_i];
-                    let mut mask: u8 = 0;
-                    for bit_i in 0..n_bits {
-                        mask |= 1u8 << (7 - bit_i);
-                    }
-                    *my_byte = mask & your_byte | *my_byte & !mask;
-                    assert!(n_bits < 8);
-                }
-            }
-
-            // To make sure exactly same num leading bits, not more, need to set next bit to inverse of target
-            if byte_i < K {
-                let offset_in_byte: usize = n_bits; // byte_i already incremented!
-                assert!(offset_in_byte <= 7);
-
-                // reverse shift because counting from left
-                let mask = 1u8 << (7 - offset_in_byte);
-                let your_byte = key.value[byte_i];
-                let your_bit_neg = mask & !your_byte;
-                self.value[byte_i] = your_bit_neg | self.value[byte_i] & !mask;
-            }
-        }
-    }
+    use crate::core::key::*;
 
     impl NodeInfo {
         pub fn new_local(id: Key) -> Self {
@@ -427,28 +394,28 @@ mod tests {
         key[0] = 0b00000000;
         key[1] = 0b00000001;
         let node1 = NodeInfo::new(
-            Key::new_raw(key),
+            Key::from_bytes(key),
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8080),
         );
 
         key[0] = 0b00000000;
         key[1] = 0b00000010;
         let node2 = NodeInfo::new(
-            Key::new_raw(key),
+            Key::from_bytes(key),
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8081),
         );
 
         key[0] = 0b00000000;
         key[1] = 0b00000011;
         let node3 = NodeInfo::new(
-            Key::new_raw(key),
+            Key::from_bytes(key),
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8082),
         );
 
         key[0] = 0b00000001;
         key[1] = 0b00000000;
         let node4 = NodeInfo::new(
-            Key::new_raw(key),
+            Key::from_bytes(key),
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8083),
         );
 
@@ -459,7 +426,7 @@ mod tests {
 
         key[0] = 0b00000000;
         key[1] = 0b00000001;
-        let lookup_key = Key::new_raw(key);
+        let lookup_key = Key::from_bytes(key);
         let num_fetch = 3;
         let closest_nodes = routing_table.get_n_closest(&lookup_key, num_fetch).unwrap();
 
