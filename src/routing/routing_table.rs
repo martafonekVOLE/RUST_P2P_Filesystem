@@ -5,6 +5,8 @@ use crate::networking::node_info::NodeInfo;
 
 use thiserror::Error;
 
+use std::cmp::Ordering;
+
 #[derive(Error, Debug, PartialEq)]
 pub enum RoutingTableError {
     #[error("All k-buckets are empty")]
@@ -14,7 +16,9 @@ pub enum RoutingTableError {
     #[error("Failed to find k-bucket")]
     BucketNotFound,
     #[error("K-bucket operation failed")]
-    KBucketFailedError(#[from] KBucketError),
+    KBucketFailed(#[from] KBucketError),
+    #[error("Attempting to store self")]
+    AttempStoreSelf,
 }
 
 impl From<RoutingTableError> for String {
@@ -42,7 +46,7 @@ impl RoutingTable {
     }
 
     pub fn store_nodeinfo(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
-        let bucket_index = self.get_bucket_index(&node_info.get_id());
+        let bucket_index = self.get_bucket_index(&node_info.get_id())?;
         if let Some(bucket) = self.buckets.get_mut(bucket_index) {
             bucket.add_nodeinfo(node_info)?;
             Ok(())
@@ -63,13 +67,9 @@ impl RoutingTable {
         Ok(())
     }
 
-    pub fn get_nodeinfo(&self, key: &Key) -> Option<&NodeInfo> {
-        let bucket_index = self.get_bucket_index(key);
-        if let Some(bucket) = self.buckets.get(bucket_index) {
-            bucket.get_nodeinfo(key)
-        } else {
-            None
-        }
+    pub fn get_nodeinfo(&self, key: &Key) -> Result<Option<&NodeInfo>, RoutingTableError> {
+        let bucket_index = self.get_bucket_index(key)?;
+        Ok(self.buckets[bucket_index].get_nodeinfo(key))
     }
 
     pub fn get_alpha_closest(&self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
@@ -81,8 +81,13 @@ impl RoutingTable {
     }
 
     /// Closest k-bucket has the most leading zeroes in distance
-    fn get_bucket_index(&self, key: &Key) -> usize {
-        RoutingTable::NUM_BUCKETS - 1 - self.id.leading_zeros_in_distance(key)
+    fn get_bucket_index(&self, key: &Key) -> Result<usize, RoutingTableError> {
+        let lz = self.id.leading_zeros_in_distance(key);
+        match lz.cmp(&RoutingTable::NUM_BUCKETS) {
+            Ordering::Equal => Err(RoutingTableError::AttempStoreSelf),
+            Ordering::Greater => Err(RoutingTableError::BucketNotFoundForId { id: *key }),
+            Ordering::Less => Ok(RoutingTable::NUM_BUCKETS - 1 - lz),
+        }
     }
 
     fn get_n_closest(&self, key: &Key, n: usize) -> Result<Vec<NodeInfo>, RoutingTableError> {
@@ -101,12 +106,10 @@ impl RoutingTable {
         */
 
         let mut result = Vec::new();
-        let bucket_index_of_key = self.get_bucket_index(key);
+        let bucket_index_of_key = self.get_bucket_index(key)?;
 
-        match self.buckets.get(bucket_index_of_key) {
-            Some(bucket) => result.extend(bucket.get_nodeinfos().iter().cloned()),
-            None => return Err(RoutingTableError::BucketNotFoundForId { id: *key }),
-        }
+        let bucket = &self.buckets[bucket_index_of_key];
+        result.extend(bucket.get_nodeinfos().iter().cloned());
 
         let mut taken_some = true;
 
@@ -159,7 +162,7 @@ impl RoutingTable {
         Ok(result.into_iter().take(n).collect())
     }
 
-    // TODO: remove (do not use)
+    // TODO: remove?
     pub fn get_all_nodeinfos(&self) -> Vec<NodeInfo> {
         let mut all_nodes = Vec::new();
         for bucket in &self.buckets {
@@ -177,8 +180,6 @@ mod tests {
     use crate::core::key::Key;
     use crate::networking::node_info::NodeInfo;
     use crate::routing::routing_table::*;
-
-    use crate::core::key::*;
 
     impl NodeInfo {
         pub fn new_local(id: Key) -> Self {
@@ -211,7 +212,7 @@ mod tests {
 
         fn fill_with_random_nodes(&mut self, num_nodes: usize) {
             /*
-            Will most likely populate only several highest-index buckets,
+            Will populate only several highest-index buckets,
             since probability of hitting low distance is exponentially low.
             Not good for testing purposes.
             */
@@ -234,7 +235,7 @@ mod tests {
             for (lz, bucket) in self.buckets.iter_mut().rev().enumerate() {
                 for _ in 0..num_nodes_per_bucket {
                     let mut key = Key::new_random();
-                    key.make_n_same_leading_bits_as(&self.id, lz);
+                    key.make_exactly_n_same_leading_bits_as(&self.id, lz);
                     let lz_true = self.id.leading_zeros_in_distance(&key);
                     assert!(lz_true == lz);
 
@@ -285,11 +286,18 @@ mod tests {
         let remote_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
         let node_info = NodeInfo::new(remote_id, remote_address);
 
-        // Store the node
-        assert!(routing_table.store_nodeinfo(node_info.clone()).is_ok());
+        match routing_table.store_nodeinfo(node_info.clone()) {
+            Ok(()) => (),
+            Err(err) => eprintln!(
+                "Failed to store nodeinfo with key: {}. My key: {}. {}",
+                node_info.get_id(),
+                id,
+                err
+            ),
+        }
 
         // Retrieve the node and verify success
-        let result = routing_table.get_nodeinfo(&remote_id);
+        let result = routing_table.get_nodeinfo(&remote_id).unwrap();
         assert!(result.is_some());
         assert_eq!(result.unwrap(), &node_info);
     }
@@ -302,7 +310,7 @@ mod tests {
         let remote_id = Key::from_input(b"remote_node");
 
         // Attempt to retrieve a non-existent node
-        let result = routing_table.get_nodeinfo(&remote_id);
+        let result = routing_table.get_nodeinfo(&remote_id).unwrap();
         assert!(result.is_none());
     }
 

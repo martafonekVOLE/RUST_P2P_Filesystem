@@ -1,4 +1,4 @@
 node_port: 8081
 cache_file_path: "cache.json"
-storage_path: "/Users/evilhands/Documents/W24/Rust/rust-p2p/p2p_storage"
+storage_path: "./storage-beacon"
 ip_address_type: "loopback" # "public" or "loopback" or "local"

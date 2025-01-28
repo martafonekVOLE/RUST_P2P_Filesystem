@@ -129,7 +129,7 @@ impl Key {
     }
 
     /// For testing purposes in Routing Table
-    pub fn make_n_same_leading_bits_as(&mut self, key: &Key, mut n_bits: usize) {
+    pub fn make_exactly_n_same_leading_bits_as(&mut self, key: &Key, mut n_bits: usize) {
         // Copy first n bits from
         let mut byte_i: usize = 0;
         for _ in 0..K {

@@ -91,7 +91,9 @@ impl Config {
 
     fn validate_storage_path(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let path = std::path::Path::new(path);
-        if !path.is_dir() {
+        if !path.exists() {
+            std::fs::create_dir_all(path)?;
+        } else if !path.is_dir() {
             return Err(format!("Storage path is not a directory: {}", path.display()).into());
         }
         Ok(())
