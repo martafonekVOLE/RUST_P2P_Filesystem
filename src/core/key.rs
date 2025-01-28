@@ -109,6 +109,8 @@ impl Key {
     /// Counts the number of leading zero bits in the XOR distance
     /// between `self` and `other`.
     pub fn leading_zeros(&self, other: &Key) -> usize {
+    /// Count the number of leading zeros in the XOR distance
+    pub fn leading_zeros_in_distance(&self, other: &Key) -> usize {
         let distance = self.distance(other);
         let mut count = 0;
         for byte in &distance {
