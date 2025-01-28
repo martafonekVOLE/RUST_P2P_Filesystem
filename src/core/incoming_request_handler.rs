@@ -43,6 +43,8 @@ pub async fn handle_received_request(
             )
             .await;
         }
+        //todo add new types
+        _ => {}
     }
 }
 

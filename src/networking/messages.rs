@@ -14,6 +14,8 @@ pub type RequestId = Uuid; // TODO make a custom strut, abstract away implementa
 pub enum RequestType {
     Ping,
     FindNode { node_id: Key },
+    Store,
+    StorePort,
 }
 
 impl Display for RequestType {
@@ -21,6 +23,8 @@ impl Display for RequestType {
         match self {
             RequestType::Ping => write!(f, "Ping"),
             RequestType::FindNode { node_id } => write!(f, "FindNode({})", node_id),
+            RequestType::Store => write!(f, "Store"),
+            RequestType::StorePort => write!(f, "StorePort"),
         }
     }
 }
@@ -29,6 +33,8 @@ impl Display for RequestType {
 pub enum ResponseType {
     Pong,
     Nodes { nodes: Vec<NodeInfo> },
+    StoreOK,
+    StorePortOK { port: u16 },
 }
 
 impl Display for ResponseType {
@@ -38,6 +44,8 @@ impl Display for ResponseType {
             ResponseType::Nodes { nodes } => {
                 write!(f, "Nodes({})", nodes.len())
             }
+            ResponseType::StoreOK => write!(f, "StoreOK"),
+            ResponseType::StorePortOK { port } => write!(f, "StorePortOK({})", port.to_string()),
         }
     }
 }
@@ -55,6 +63,13 @@ impl ResponseType {
         match self {
             ResponseType::Nodes { nodes } => Ok(nodes),
             _ => Err("Attempted to convert wrong response type - expected Nodes"),
+        }
+    }
+
+    pub fn port_into_u16(self) -> Result<u16, &'static str> {
+        match self {
+            ResponseType::StorePortOK { port } => Ok(port),
+            _ => Err("Attempted to convert wrong response type - expected Port"),
         }
     }
 }

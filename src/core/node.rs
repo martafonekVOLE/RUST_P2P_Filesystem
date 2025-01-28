@@ -1,5 +1,5 @@
-use crate::constants::LOOKUP_TIMEOUT_MILLISECONDS;
 use crate::constants::PING_TIMEOUT_MILLISECONDS;
+use crate::constants::{ALPHA, LOOKUP_TIMEOUT_MILLISECONDS};
 use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
 use crate::core::lookup::{LookupBuffer, LookupResponse};
@@ -8,6 +8,7 @@ use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
+use crate::storage::file_manager::{Chunk, FileManager};
 use futures::future::join_all;
 use log::info;
 use std::net::SocketAddr;
@@ -156,6 +157,101 @@ impl Node {
 
         // Render the final result
         Ok(lookup_buffer.get_resulting_vector())
+    }
+
+    pub async fn store(&self, file_path: &str) -> Result<(), &str> {
+        if !FileManager::check_file_exists(file_path) {
+            return Err("File not found.");
+        }
+
+        //
+        // Call start sharding
+        //
+
+        loop {
+            //
+            // Magic with file sharding - todo change this stub into "next"
+            //
+            let chunk = FileManager::temp_sharding();
+
+            match chunk {
+                Some(chunk) => {
+                    if self.handle_chunk(chunk).await.is_err() {
+                        return Err("Error handling chunk.");
+                    }
+                }
+                _ => {
+                    //
+                    // Close file descriptor
+                    //
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    async fn handle_chunk(&self, chunk: Chunk) -> Result<(), &str> {
+        let closest_nodes = self
+            .find_node(chunk.get_hash())
+            .await
+            .expect("No closest nodes.");
+        let mut responsive_alpha_closest_nodes: Vec<Response> = Vec::new();
+
+        // take alpha nodes,
+        // maybe improve in future by taking the fastest ones -> need to add metric
+        for node in closest_nodes {
+            if let Ok(response) = self.send_initial_store_request(node).await {
+                if response.response_type == ResponseType::StoreOK {
+                    responsive_alpha_closest_nodes.push(response);
+                }
+            }
+
+            if responsive_alpha_closest_nodes.len() >= ALPHA {
+                break;
+            }
+        }
+
+        if responsive_alpha_closest_nodes.len() == 0 {
+            return Err("No responsive nodes.");
+        }
+
+        let mut ports_responses: Vec<Response> = Vec::new();
+        for response in responsive_alpha_closest_nodes {
+            if let Ok(response) = self.send_store_port_request(response.sender).await {
+                if let (ResponseType::StorePortOK { port }) = response.response_type {
+                    ports_responses.push(response);
+                }
+            }
+        }
+
+        if ports_responses.len() == 0 {
+            return Err("No port returned from nodes.");
+        }
+
+        for response in ports_responses {
+            self.establish_tcp_stream_and_send_data(response).await;
+        }
+
+        Ok(())
+    }
+
+    async fn send_initial_store_request(&self, node_info: NodeInfo) -> Result<Response, &str> {
+        let request = Request::new(RequestType::Store, self.to_node_info(), node_info);
+
+        // Just call the send_request_and_wait method, it will return err if the request fails
+        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+            .await
+    }
+
+    async fn send_store_port_request(&self, node_info: NodeInfo) -> Result<Response, &str> {
+        let request = Request::new(RequestType::StorePort, self.to_node_info(), node_info);
+
+        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+            .await
+    }
+
+    async fn establish_tcp_stream_and_send_data(&self, response: Response) {
+        todo!()
     }
 
     ///

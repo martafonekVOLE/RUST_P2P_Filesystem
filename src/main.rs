@@ -129,6 +129,10 @@ async fn main() {
                     println!("Invalid node ID: {}", e);
                 }
             },
+            "store" if parts.len() == 3 => {
+                let file_path = parts[1];
+                node.store(file_path).await;
+            }
             _ => {
                 println!("Unknown command or incorrect arguments");
             }
