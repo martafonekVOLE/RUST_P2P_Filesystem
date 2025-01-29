@@ -8,6 +8,7 @@ mod sharding;
 mod storage;
 mod utils;
 
+use crate::constants::K;
 use crate::core::key::Key;
 use crate::core::node::Node;
 use crate::networking::node_info::NodeInfo;
@@ -15,7 +16,7 @@ use clap::builder::TypedValueParser;
 use clap::Parser;
 use cli::args::Arguments;
 use config::Config;
-use log::{info, warn, LevelFilter};
+use log::{error, info, warn, LevelFilter};
 use p2p::utils::logging::init_logging;
 use public_ip;
 use std::io::BufRead;
@@ -71,9 +72,7 @@ async fn main() {
 
         // Attempt to join the network
         match node.join_network(beacon_node_info).await {
-            Ok(_) => {
-                info!("Successfully joined the network!");
-            }
+            Ok(_) => {}
             Err(e) => {
                 warn!("Failed to join the network: {}", e);
                 return;
@@ -81,12 +80,20 @@ async fn main() {
         }
     }
 
-    //
-    // Key, metadata (chuck1, chuck2, .. ) checksum
-    //
-    // file=hash
-    //
-
+    println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");
+    println!(
+        "Welcome to the network! Your node is {}",
+        node.to_node_info()
+    );
+    println!("Available commands:");
+    println!(" - ping <key>: Send a PING request to the specified node");
+    println!(" - find_node <key>: Resolves {} closest nodes to <key>", K);
+    println!(" - dump_rt: Display the contents of the routing table");
+    println!(
+        "Note: <key> should be a {}-character hexadecimal string",
+        K * 2
+    );
+    println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");
     // Synchronous loop reading stdin lines; pass commands to node API
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
@@ -99,18 +106,18 @@ async fn main() {
         match parts[0] {
             "ping" if parts.len() == 2 => match Key::from_hex_str(parts[1]) {
                 Ok(node_id) => {
-                    let reachable = node.ping(node_id).await;
-                    match reachable {
-                        Ok(reachable) => {
-                            println!("Node {} is reachable: {:?}", parts[1], reachable);
+                    let response = node.ping(node_id).await;
+                    match response {
+                        Ok(response) => {
+                            println!("{} responded to PING: {}", parts[1], response);
                         }
                         Err(e) => {
-                            println!("Failed to ping node {}: {}", parts[1], e);
+                            eprintln!("{} failed to respond to PING: {}", parts[1], e);
                         }
                     }
                 }
                 Err(e) => {
-                    println!("Invalid node ID: {}", e);
+                    eprintln!("Invalid node ID: {}", e);
                 }
             },
             "find_node" if parts.len() == 2 => match Key::from_hex_str(parts[1]) {
@@ -122,16 +129,27 @@ async fn main() {
                             println!(" - {}", node);
                         }
                     } else {
-                        println!("Failed to find closest nodes: {:?}", closest_nodes);
+                        eprintln!("Failed to find closest nodes: {:?}", closest_nodes);
                     }
                 }
                 Err(e) => {
-                    println!("Invalid node ID: {}", e);
+                    eprintln!("Invalid node ID: {}", e);
                 }
             },
+            "dump_rt" if parts.len() == 1 => {
+                let all_contacts = node.get_routing_table_content().await;
+                println!("Routing table content:");
+                for contact in all_contacts {
+                    println!(" - {}", contact);
+                }
+            }
             _ => {
-                println!("Unknown command or incorrect arguments");
+                eprintln!(
+                    "Unknown command '{}', should be 'dump_rt', 'find_node <key>', 'ping <key>'",
+                    parts[0]
+                );
             }
         }
+        println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");
     }
 }

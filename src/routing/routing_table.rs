@@ -162,7 +162,6 @@ impl RoutingTable {
         Ok(result.into_iter().take(n).collect())
     }
 
-    // TODO: remove?
     pub fn get_all_nodeinfos(&self) -> Vec<NodeInfo> {
         let mut all_nodes = Vec::new();
         for bucket in &self.buckets {
