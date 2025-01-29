@@ -10,6 +10,7 @@ use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
 use futures::future::join_all;
 use log::info;
+use std::cmp::PartialEq;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket as TokioUdpSocket;
@@ -50,8 +51,15 @@ impl Node {
     ///
     /// This method converts Node to NodeInfo
     ///
-    fn to_node_info(&self) -> NodeInfo {
+    pub(crate) fn to_node_info(&self) -> NodeInfo {
         NodeInfo::new(self.key, self.address)
+    }
+
+    ///
+    /// Dumps the routing table into a string form
+    ///
+    pub async fn get_routing_table_content(&self) -> Vec<NodeInfo> {
+        self.routing_table.read().await.get_all_nodeinfos()
     }
 
     ///
@@ -127,7 +135,8 @@ impl Node {
         }
 
         // Inject the initial resolvers into the result buffer
-        let mut lookup_buffer = LookupBuffer::new(target.clone(), initial_resolvers);
+        let mut lookup_buffer =
+            LookupBuffer::new(target.clone(), initial_resolvers, self.to_node_info());
 
         loop {
             // Get the resolvers for this
@@ -168,17 +177,20 @@ impl Node {
     /// and the Node is ready to participate in the network.
     ///
     pub async fn join_network(&self, beacon_node: NodeInfo) -> Result<Vec<NodeInfo>, String> {
+        info!(
+            "Beginning join_network procedure via beacon {}",
+            beacon_node.id
+        );
         self.routing_table
             .write()
             .await
             .store_nodeinfo(beacon_node.clone())
             .expect("Failed to add beacon node to RT");
 
-        info!("Joining network with beacon node: {}", beacon_node.id);
         self.ping(beacon_node.id).await.map_err(|e| e.to_string())?;
 
         // Send single find_node to the beacon to get the initial k-closest nodes
-        let initial_k_closest = self
+        let mut initial_k_closest = self
             .single_lookup(self.key, beacon_node.clone())
             .await
             .get_k_closest();
@@ -187,8 +199,13 @@ impl Node {
             return Err("Failed to join network. Beacon node did not respond.".to_string());
         }
 
+        // In case we are the second node in the network, the response only contains us. Therefore,
+        // we should remove ourselves from the initial_k_closest list to prevent storing ourselves
+        // in the routing table (As we would be sending message to ourselves)
+        initial_k_closest.retain(|node| *node != self.to_node_info());
+
         // Inject the initial resolvers into the result buffer
-        let mut lookup_buffer = LookupBuffer::new(self.key, initial_k_closest);
+        let mut lookup_buffer = LookupBuffer::new(self.key, initial_k_closest, self.to_node_info());
 
         // Execute all lookup rounds
         loop {
@@ -216,9 +233,10 @@ impl Node {
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
         for node_info in lookup_buffer.get_responsive_nodes() {
-            routing_table.store_nodeinfo(node_info).unwrap();
+            routing_table.store_nodeinfo(node_info)?;
         }
 
+        info!("Successfully joined the network!");
         // Render the final result
         Ok(lookup_buffer.get_resulting_vector())
     }

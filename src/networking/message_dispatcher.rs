@@ -29,6 +29,13 @@ impl MessageDispatcher {
     /// Uses lock to abstract away the thread safety of the socket.
     ///
     pub async fn send_request(&self, request: Request) -> Result<usize, Error> {
+        if request.receiver == request.sender {
+            return Err(Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Sender and receiver must not be the same (possible message to self)",
+            ));
+        }
+
         let serialized_request =
             serde_json::to_vec(&request).expect("Failed to serialize request type");
         let socket = self.socket.lock().await;

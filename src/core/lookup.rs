@@ -76,15 +76,20 @@ impl LookupResponse {
 pub struct LookupBuffer {
     nodes: Vec<LookupNodeInfo>,
     target: Key,
+    this_node: NodeInfo,
 }
 
 impl LookupBuffer {
-    pub(crate) fn new(target: Key, initial_nodes: Vec<NodeInfo>) -> Self {
+    pub(crate) fn new(target: Key, initial_nodes: Vec<NodeInfo>, this_node: NodeInfo) -> Self {
         let mut nodes = Vec::new();
         for node in initial_nodes {
             nodes.push(LookupNodeInfo::new(node));
         }
-        let mut result_buffer = LookupBuffer { nodes, target };
+        let mut result_buffer = LookupBuffer {
+            nodes,
+            target,
+            this_node,
+        };
         result_buffer.sort();
         result_buffer
     }
@@ -110,13 +115,15 @@ impl LookupBuffer {
         let previous_k_closest = self.get_resulting_vector();
 
         for response in responses {
+            // If the response was a failure, mark the resolver node as responded
             if !response.success {
+                self.mark_node_as_queried(response.resolver.id);
                 continue;
             }
 
             for node in response.k_closest {
-                let lookup_node_info = LookupNodeInfo::new(node);
-                if !self.nodes.contains(&lookup_node_info) {
+                let lookup_node_info = LookupNodeInfo::new(node.clone());
+                if !self.nodes.contains(&lookup_node_info) && self.this_node != node {
                     self.nodes.push(lookup_node_info);
                 }
             }
@@ -206,6 +213,10 @@ mod tests {
         NodeInfo::new(key, addr)
     }
 
+    fn get_this_node_mock() -> NodeInfo {
+        make_node_info("this_node", 0)
+    }
+
     #[test]
     fn test_lookup_node_info_equality() {
         let node_a = make_node_info("same", 8000);
@@ -263,7 +274,7 @@ mod tests {
             make_node_info("node_b", 8002),
             make_node_info("node_c", 8003),
         ];
-        let buffer = LookupBuffer::new(target, initial_nodes);
+        let buffer = LookupBuffer::new(target, initial_nodes, get_this_node_mock());
         assert_eq!(buffer.nodes.len(), 3);
     }
 
@@ -278,6 +289,7 @@ mod tests {
                 make_node_info("z", 8006),
                 make_node_info("w", 8007),
             ],
+            get_this_node_mock(),
         );
         buffer.nodes[2].queried = true;
         buffer.nodes[2].responded = false;
@@ -293,6 +305,7 @@ mod tests {
         let mut buffer = LookupBuffer::new(
             target,
             vec![make_node_info("r1", 9001), make_node_info("r2", 9002)],
+            get_this_node_mock(),
         );
         let old_vec = buffer.get_resulting_vector();
 
@@ -327,6 +340,7 @@ mod tests {
                 make_node_info("alpha_3", 8083),
                 make_node_info("alpha_4", 8084),
             ],
+            get_this_node_mock(),
         );
         let alpha_nodes = buffer.get_alpha_unqueried_nodes();
         assert_eq!(alpha_nodes.len(), ALPHA);
@@ -351,10 +365,31 @@ mod tests {
                 make_node_info("u3", 8103),
                 make_node_info("u4", 8104),
             ],
+            get_this_node_mock(),
         );
         buffer.nodes[0].queried = true;
         buffer.nodes[1].queried = true;
         let unqueried = buffer.get_unqueried_resulting_nodes();
         assert_eq!(unqueried.len(), 2);
+    }
+
+    #[test]
+    fn test_cant_add_this_node_to_nodes() {
+        let target = Key::from_input(b"this_node");
+        let this_node = get_this_node_mock();
+
+        let resolver = make_node_info("resolver", 7000);
+
+        let mut buffer = LookupBuffer::new(target, vec![resolver.clone()], this_node.clone());
+
+        // Result containing this_node
+        let lr = LookupResponse::new_successful(resolver, vec![this_node.clone()]);
+
+        // Record the response
+        buffer.record_lookup_round_responses(vec![lr]);
+
+        // Check that this_node is not in the resulting vector
+        let resulting_nodes = buffer.get_resulting_vector();
+        assert!(!resulting_nodes.contains(&this_node));
     }
 }

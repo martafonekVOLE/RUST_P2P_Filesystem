@@ -106,5 +106,11 @@ async fn handle_find_node_message(
 ///
 async fn record_possible_neighbour(routing_table: Arc<RwLock<RoutingTable>>, node: &NodeInfo) {
     let mut routing_table = routing_table.write().await;
-    routing_table.store_nodeinfo(node.clone()).unwrap();
+    // routing_table.store_nodeinfo(node.clone()).unwrap();
+    match routing_table.store_nodeinfo(node.clone()) {
+        Ok(_) => {}
+        Err(e) => {
+            error!("Failed to store node info: {}", e);
+        }
+    }
 }

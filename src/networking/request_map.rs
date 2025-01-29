@@ -1,7 +1,7 @@
 // request_map.rs
 use crate::networking::messages::RequestId;
 use crate::networking::messages::Response;
-use log::{error, warn};
+use log::{error, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
@@ -59,6 +59,7 @@ impl RequestMap {
     /// If the request ID is unknown, logs a warning and discards the incoming response.
     /// This method is thread-safe.
     pub async fn handle_response(&self, response: Response) {
+        info!("Received response: {}", response);
         let request_id = response.request_id;
 
         // Check if the incoming response matches a pending request
