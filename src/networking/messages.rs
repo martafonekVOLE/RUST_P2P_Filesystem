@@ -15,7 +15,7 @@ pub enum RequestType {
     Ping,
     FindNode { node_id: Key },
     Store,
-    StorePort,
+    StorePort { file_id: Key },
 }
 
 impl Display for RequestType {
@@ -24,7 +24,7 @@ impl Display for RequestType {
             RequestType::Ping => write!(f, "Ping"),
             RequestType::FindNode { node_id } => write!(f, "FindNode({})", node_id),
             RequestType::Store => write!(f, "Store"),
-            RequestType::StorePort => write!(f, "StorePort"),
+            RequestType::StorePort { file_id } => write!(f, "StorePort({})", file_id),
         }
     }
 }

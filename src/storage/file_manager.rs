@@ -1,20 +1,35 @@
 use crate::core::key::Key;
+use crate::networking::node_info::NodeInfo;
+use crate::storage::storage_table::StorageTable;
+use std::time::SystemTime;
 
-pub struct FileManager {}
-
+#[derive(Clone)]
 pub struct Chunk {
     hash: Key,
-    chunk: Vec<u8>,
+    data: Vec<u8>,
 }
 
 impl Chunk {
     pub fn get_hash(&self) -> Key {
         self.hash.clone()
     }
+    pub fn get_data(&self) -> Vec<u8> {
+        self.data.clone()
+    }
+}
+
+pub struct FileManager {
+    storage_table: StorageTable,
 }
 
 impl FileManager {
-    pub fn check_file_exists(file_path: &str) -> bool {
+    pub fn new() -> FileManager {
+        FileManager {
+            storage_table: StorageTable::new(),
+        }
+    }
+
+    pub fn check_file_exists(&self, file_path: &str) -> bool {
         // Check if the provided file path exists in the storage path from Config
         todo!()
     }
@@ -22,7 +37,11 @@ impl FileManager {
     pub fn temp_sharding() -> Option<Chunk> {
         Some(Chunk {
             hash: Key::from_input(String::new().as_bytes()),
-            chunk: Vec::new(),
+            data: Vec::new(),
         })
+    }
+
+    pub fn save_data_sent(&self, node: &NodeInfo, hash: Key, saved_at: SystemTime) {
+        todo!()
     }
 }
