@@ -162,7 +162,7 @@ async fn handle_store_port_message(
 
     let port = socket_address.port();
 
-    // Store into active TCP connections
+    // Store node into active TCP connections
     if let None = shard_storage_manager
         .write()
         .await

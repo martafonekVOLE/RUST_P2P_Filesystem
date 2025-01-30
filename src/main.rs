@@ -131,7 +131,14 @@ async fn main() {
             },
             "store" if parts.len() == 3 => {
                 let file_path = parts[1];
-                node.store(file_path).await;
+                match node.store(file_path).await {
+                    Ok(()) => {
+                        println!("Successfully stored!");
+                    }
+                    Err(e) => {
+                        println!("Failed to store: {}", e);
+                    }
+                }
             }
             _ => {
                 println!("Unknown command or incorrect arguments");
