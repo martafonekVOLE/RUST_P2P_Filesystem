@@ -177,9 +177,11 @@ storage_path: "/tmp/storage"
         // We'll supply skip_join = false so that beacon fields must be present.
         let temp_dir = tempdir().expect("Failed to create temp dir");
         let storage_path = temp_dir.path().join("storage");
+        let storage_path = storage_path.to_string_lossy().replace("\\", "/");
         std::fs::create_dir_all(&storage_path).expect("Failed to create storage dir");
 
         let cache_file_path = temp_dir.path().join("cache_file");
+        let cache_file_path = cache_file_path.to_string_lossy().replace("\\", "/");
         File::create(&cache_file_path).expect("Failed to create cache file");
 
         let yaml_data = format!(
@@ -191,8 +193,7 @@ ip_address_type: "loopback"
 cache_file_path: "{}"
 storage_path: "{}"
 "#,
-            cache_file_path.display(),
-            storage_path.display(),
+            cache_file_path, storage_path,
         );
 
         let config_file_path = temp_dir.path().join("config.yaml");
@@ -214,11 +215,8 @@ storage_path: "{}"
         // node_port is an Option, so let's unwrap it.
         assert_eq!(config.node_port.unwrap(), 8080);
         assert!(matches!(config.ip_address_type, IpAddressType::Loopback));
-        assert_eq!(
-            config.cache_file_path.as_ref().unwrap(),
-            cache_file_path.to_str().unwrap()
-        );
-        assert_eq!(config.storage_path, storage_path.to_str().unwrap());
+        assert_eq!(config.cache_file_path.unwrap(), cache_file_path);
+        assert_eq!(config.storage_path, storage_path);
     }
 
     #[test]
@@ -226,9 +224,11 @@ storage_path: "{}"
         // Same setup, but we'll override node_port by passing Some(...) as port_arg
         let temp_dir = tempdir().expect("Failed to create temp dir");
         let storage_path = temp_dir.path().join("storage");
+        let storage_path = storage_path.to_string_lossy().replace("\\", "/");
         std::fs::create_dir_all(&storage_path).expect("Failed to create storage dir");
 
         let cache_file_path = temp_dir.path().join("cache_file");
+        let cache_file_path = cache_file_path.to_string_lossy().replace("\\", "/");
         File::create(&cache_file_path).expect("Failed to create cache file");
 
         let yaml_data = format!(
@@ -240,8 +240,7 @@ ip_address_type: "loopback"
 cache_file_path: "{}"
 storage_path: "{}"
 "#,
-            cache_file_path.display(),
-            storage_path.display(),
+            cache_file_path, storage_path,
         );
 
         let config_file_path = temp_dir.path().join("config.yaml");
