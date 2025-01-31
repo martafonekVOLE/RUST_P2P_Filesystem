@@ -20,3 +20,8 @@ hex = "0.4.3"
 public-ip = "0.2.2"
 get_if_addrs = "0.5.3"
 futures = "0.3.31"
+aes-gcm = "0.10.3"
+anyhow = "1.0.95"
+
+[lints.rust]
+unused = "allow"
