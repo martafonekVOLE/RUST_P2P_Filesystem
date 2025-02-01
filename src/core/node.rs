@@ -1,5 +1,5 @@
-use crate::constants::LOOKUP_TIMEOUT_MILLISECONDS;
 use crate::constants::PING_TIMEOUT_MILLISECONDS;
+use crate::constants::{ALPHA, LOOKUP_TIMEOUT_MILLISECONDS};
 use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
 use crate::core::lookup::{LookupBuffer, LookupResponse};
@@ -8,12 +8,17 @@ use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
+use crate::storage::file_manager::{Chunk, FileManager};
+use crate::storage::shard_storage_manager::ShardStorageManager;
 use futures::future::join_all;
 use log::info;
 use std::cmp::PartialEq;
 use std::net::SocketAddr;
+use std::os::linux::raw::stat;
 use std::sync::Arc;
-use tokio::net::UdpSocket as TokioUdpSocket;
+use std::time::SystemTime;
+use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpStream, UdpSocket as TokioUdpSocket};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
@@ -27,10 +32,12 @@ pub struct Node {
     routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
     message_dispatcher: Arc<MessageDispatcher>,
+    file_manager: FileManager,
+    shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
 }
 
 impl Node {
-    pub async fn new(key: Key, ip: String, port: u16) -> Self {
+    pub async fn new(key: Key, ip: String, port: u16, storage_path: String) -> Self {
         let address: SocketAddr = format!("{}:{}", ip, port).parse().expect("Invalid address");
         let socket = TokioUdpSocket::bind(address)
             .await
@@ -45,6 +52,8 @@ impl Node {
             routing_table: Arc::new(RwLock::new(RoutingTable::new(key))),
             request_map: RequestMap::new(),
             message_dispatcher: Arc::new(MessageDispatcher::new().await),
+            file_manager: FileManager::new(),
+            shard_storage_manager: Arc::new(RwLock::new(ShardStorageManager::new(storage_path))),
         }
     }
 
@@ -168,6 +177,190 @@ impl Node {
 
         // Render the final result
         Ok(lookup_buffer.get_resulting_vector())
+    }
+
+    ///
+    /// Method handling file uploads
+    ///
+    pub async fn store(&self, file_path: &str) -> Result<(), &str> {
+        // Step 1: check file existence
+        if !self.file_manager.check_file_exists(file_path) {
+            return Err("File not found.");
+        }
+
+        // Step 2: call start sharding
+
+        // Step 3: loop over shards
+        loop {
+            // Step 3.1: get next shard (todo change this stub into "next")
+            let chunk = FileManager::temp_sharding();
+
+            match chunk {
+                Some(chunk) => {
+                    // Step 4: get ALPHA nodes responsible for the chunk
+                    let responsible_nodes = self
+                        .get_responsive_nodes_responsible_for_chunk(chunk.clone())
+                        .await?;
+
+                    // Step 5: get ports for TCP data transfer
+                    let ports = self
+                        .request_available_port_for_tcp_data_transfer(
+                            responsible_nodes,
+                            chunk.clone().get_hash(),
+                        )
+                        .await?;
+
+                    let mut successfully_sent_to: Vec<NodeInfo> = Vec::new();
+
+                    // Step 6: send data to each node over TCP
+                    for response in ports {
+                        let status = self
+                            .establish_tcp_stream_and_send_data(
+                                response.clone(),
+                                chunk.clone().get_data(),
+                            )
+                            .await;
+                        if let Ok(_) = status {
+                            // Step 7: save info to FileManager
+                            self.file_manager.save_data_sent(
+                                &response.sender,
+                                chunk.clone().get_hash(),
+                                SystemTime::now(),
+                            );
+                            successfully_sent_to.push(response.sender.clone())
+                        }
+                    }
+
+                    if successfully_sent_to.len() > 0 {
+                        println!("Chunk successfully uploaded.");
+                    } else {
+                        // Future-improvement: Chunk may be sent again to different nodes.
+                        return Err("Chunk was not sent!");
+                    }
+                }
+                _ => {
+                    // Step 8: Close file descriptor
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    ///
+    /// Get ALPHA most responsive closest nodes for provided chunk.
+    ///
+    async fn get_responsive_nodes_responsible_for_chunk(
+        &self,
+        chunk: Chunk,
+    ) -> Result<Vec<Response>, &str> {
+        let closest_nodes = self
+            .find_node(chunk.get_hash())
+            .await
+            .expect("No closest nodes.");
+        let mut responsive_alpha_closest_nodes: Vec<Response> = Vec::new();
+
+        // Step 4.1: send STORE request to K nodes
+        for node in closest_nodes {
+            // Future-improvement: we can update K-bucket with responsive nodes or remove ones which did not respond
+            if let Ok(response) = self.send_initial_store_request(node).await {
+                if response.response_type == ResponseType::StoreOK {
+                    // Step 4.2: take ALPHA responsive nodes (future-improvement: take fastest)
+                    responsive_alpha_closest_nodes.push(response);
+                }
+            }
+
+            if responsive_alpha_closest_nodes.len() >= ALPHA {
+                break;
+            }
+        }
+
+        if responsive_alpha_closest_nodes.len() == 0 {
+            return Err("No responsive nodes.");
+        }
+
+        Ok(responsive_alpha_closest_nodes)
+    }
+
+    ///
+    /// Receive ports for establishing TCP connection
+    ///
+    async fn request_available_port_for_tcp_data_transfer(
+        &self,
+        nodes: Vec<Response>,
+        key: Key,
+    ) -> Result<Vec<Response>, &str> {
+        let mut ports_responses: Vec<Response> = Vec::new();
+        for response in nodes {
+            if let Ok(response) = self
+                .send_store_port_request(response.sender, key.clone())
+                .await
+            {
+                if let (ResponseType::StorePortOK { port }) = response.response_type {
+                    ports_responses.push(response);
+                }
+            }
+        }
+
+        if ports_responses.len() == 0 {
+            return Err("No port returned from nodes.");
+        }
+
+        Ok(ports_responses)
+    }
+
+    ///
+    /// Send initial STORE request to a node
+    ///
+    async fn send_initial_store_request(&self, node_info: NodeInfo) -> Result<Response, &str> {
+        let request = Request::new(RequestType::Store, self.to_node_info(), node_info);
+
+        // Just call the send_request_and_wait method, it will return err if the request fails
+        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+            .await
+    }
+
+    ///
+    /// Send STORE PORT request
+    ///
+    async fn send_store_port_request(
+        &self,
+        node_info: NodeInfo,
+        key: Key,
+    ) -> Result<Response, &str> {
+        let request = Request::new(
+            RequestType::StorePort { file_id: key },
+            self.to_node_info(),
+            node_info,
+        );
+
+        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+            .await
+    }
+
+    ///
+    /// Send file over TCP
+    ///
+    async fn establish_tcp_stream_and_send_data(
+        &self,
+        response: Response,
+        data: Vec<u8>,
+    ) -> Result<(), &str> {
+        if let (ResponseType::StorePortOK { port }) = response.response_type {
+            let address =
+                response.sender.address.ip().to_string() + ":" + port.to_string().as_str();
+            let mut stream = TcpStream::connect(address)
+                .await
+                .expect("Unable to connect to the TCP Stream.");
+
+            stream
+                .write_all(data.as_slice())
+                .await
+                .expect("Unable to write data.");
+
+            Ok(())
+        } else {
+            Err("Unable to establish TCP stream.")
+        }
     }
 
     ///
@@ -308,6 +501,7 @@ impl Node {
         let routing_table = Arc::clone(&self.routing_table);
         let request_map = self.request_map.clone();
         let message_dispatcher = Arc::clone(&self.message_dispatcher);
+        let shard_manager = Arc::clone(&self.shard_storage_manager);
         let this_node_info = self.to_node_info();
 
         // Spawn an indefinitely looping async task to listen for incoming messages
@@ -329,6 +523,7 @@ impl Node {
                         } else if let Ok(request) = serde_json::from_slice::<Request>(data) {
                             let routing_table = Arc::clone(&routing_table);
                             let message_dispatcher = Arc::clone(&message_dispatcher);
+                            let shard_manager = Arc::clone(&shard_manager);
                             let this_node_info = this_node_info.clone();
                             task::spawn(async move {
                                 handle_received_request(
@@ -336,6 +531,7 @@ impl Node {
                                     request,
                                     routing_table,
                                     message_dispatcher,
+                                    shard_manager,
                                 )
                                 .await;
                             });
@@ -363,7 +559,7 @@ mod tests {
     #[tokio::test]
     async fn test_ping_response() -> Result<(), Box<dyn std::error::Error>> {
         let key = Key::new_random();
-        let node = Node::new(key.clone(), "127.0.0.1".to_string(), 8081).await;
+        let node = Node::new(key.clone(), "127.0.0.1".to_string(), 8081, "/".to_string()).await;
         let node_address = node.address;
 
         // Start the listener so the node can receive requests.
