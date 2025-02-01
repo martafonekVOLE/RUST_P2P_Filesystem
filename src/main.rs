@@ -1,22 +1,14 @@
 mod cli;
-mod config;
-mod constants;
-mod core;
-mod networking;
-mod routing;
-mod sharding;
-mod storage;
-mod utils;
 
-use crate::constants::K;
-use crate::core::key::Key;
-use crate::core::node::Node;
-use crate::networking::node_info::NodeInfo;
 use clap::builder::TypedValueParser;
 use clap::Parser;
 use cli::args::Arguments;
-use config::Config;
 use log::{error, info, warn, LevelFilter};
+use p2p::config::Config;
+use p2p::constants::K;
+use p2p::core::key::Key;
+use p2p::core::node::Node;
+use p2p::networking::node_info::NodeInfo;
 use p2p::utils::logging::init_logging;
 use public_ip;
 use std::io::BufRead;
@@ -145,6 +137,8 @@ async fn main() {
                     Err(e) => {
                         println!("Failed to store: {}", e);
                     }
+                }
+            }
             "dump_rt" if parts.len() == 1 => {
                 let all_contacts = node.get_routing_table_content().await;
                 println!("Routing table content:");

@@ -14,7 +14,6 @@ use futures::future::join_all;
 use log::info;
 use std::cmp::PartialEq;
 use std::net::SocketAddr;
-use std::os::linux::raw::stat;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
@@ -26,8 +25,8 @@ use tokio::time::{timeout, Duration};
 use std::error::Error;
 
 pub struct Node {
-    pub(crate) key: Key,
-    pub(crate) address: SocketAddr,
+    pub key: Key,
+    pub address: SocketAddr,
     socket: Arc<TokioUdpSocket>, // Use Tokio's UdpSocket for async I/O
     routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
@@ -60,7 +59,7 @@ impl Node {
     ///
     /// This method converts Node to NodeInfo
     ///
-    pub(crate) fn to_node_info(&self) -> NodeInfo {
+    pub fn to_node_info(&self) -> NodeInfo {
         NodeInfo::new(self.key, self.address)
     }
 
