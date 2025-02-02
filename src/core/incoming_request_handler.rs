@@ -57,7 +57,7 @@ pub async fn handle_received_request(
                 request,
                 message_dispatcher,
                 shard_storage_manager,
-                file_id,
+                file_id, // TODO: rename to chunk_hash?
             )
             .await;
         }
@@ -124,6 +124,9 @@ async fn handle_store_message(
     request: Request,
     message_dispatcher: MessageDispatcher,
 ) {
+    // TODO: check first if chunk with this hash is already stored,
+    // in this case send response that chunk is already stored and just updated TTL or smth.
+    
     // Respond with a StoreOK message.
     let response = Response::new(
         ResponseType::StoreOK,
@@ -144,6 +147,7 @@ async fn handle_store_port_message(
     shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
     file_id: Key,
 ) {
+    // TODO: maybe use LOCALHOST macro from std instead?
     let tcp_listener = match TcpListener::bind("127.0.0.1:0").await {
         Ok(listener) => listener,
         Err(e) => {

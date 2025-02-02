@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 pub struct DataTransfer {
     sender: NodeInfo,
-    key: Key,
+    key: Key, // chunk hash
 }
 
+// TOOD: Make members public instead of adding getters?
 impl DataTransfer {
     pub fn new(sender: NodeInfo, key: Key) -> DataTransfer {
         DataTransfer { sender, key }
@@ -22,7 +23,7 @@ impl DataTransfer {
 }
 
 pub struct DataTransfersTable {
-    transfers: HashMap<u16, DataTransfer>,
+    transfers: HashMap<u16, DataTransfer>, // Maps port to sender info
 }
 
 impl DataTransfersTable {

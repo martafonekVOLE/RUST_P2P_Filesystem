@@ -18,6 +18,7 @@ impl Chunk {
     }
 }
 
+/// Keeps map of uploaded files to reupload them every 24 hours
 pub struct FileManager {
     storage_table: StorageTable,
 }

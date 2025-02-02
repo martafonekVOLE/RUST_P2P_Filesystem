@@ -49,7 +49,7 @@ impl ShardStorageManager {
         &mut self,
         port: u16,
         sender: NodeInfo,
-        key: Key,
+        key: Key, // Key is chunk hash
     ) -> Option<DataTransfer> {
         self.data_transfers_table.add(port, sender, key)
     }

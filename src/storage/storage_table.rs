@@ -3,9 +3,10 @@ use crate::networking::node_info::NodeInfo;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+// TODO: Maybe rename to ChunkFileInfo or ShardFileInfo?
 pub struct FileInfo {
-    pub time: SystemTime,
-    pub ttl: u16,
+    pub time: SystemTime, // Time when chunk was saved
+    pub ttl: u16,         // to know when to republish the file
     pub uploader: NodeInfo,
 }
 

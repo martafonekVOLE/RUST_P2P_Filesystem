@@ -261,6 +261,7 @@ impl Node {
         // Step 4.1: send STORE request to K nodes
         for node in closest_nodes {
             // Future-improvement: we can update K-bucket with responsive nodes or remove ones which did not respond
+            // NOTE: reponsive nodes already added in find-node.
             if let Ok(response) = self.send_initial_store_request(node).await {
                 if response.response_type == ResponseType::StoreOK {
                     // Step 4.2: take ALPHA responsive nodes (future-improvement: take fastest)

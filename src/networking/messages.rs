@@ -33,6 +33,7 @@ impl Display for RequestType {
 pub enum ResponseType {
     Pong,
     Nodes { nodes: Vec<NodeInfo> },
+    // TODO: Add option to responsd that Chunk is already stored and no need to trasnfer the chunk again.
     StoreOK,
     StorePortOK { port: u16 },
 }
