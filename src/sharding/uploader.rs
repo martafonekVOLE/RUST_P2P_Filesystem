@@ -22,10 +22,12 @@ pub struct FileUploader {
 }
 
 impl FileUploader {
+    // For testing purposes
     async fn new_with_max_file_size(
-        full_file_path: &Path,
+        full_file_path: &str,
         max_file_size_mb: usize,
     ) -> Result<Self, ShardingError> {
+        let full_file_path = Path::new(full_file_path);
         let file = if full_file_path.exists() {
             TokioFile::open(full_file_path).await?
         } else {
@@ -57,7 +59,8 @@ impl FileUploader {
             chunk_size,
         })
     }
-    pub async fn new(full_file_path: &Path) -> Result<Self, ShardingError> {
+
+    pub async fn new(full_file_path: &str) -> Result<Self, ShardingError> {
         FileUploader::new_with_max_file_size(full_file_path, MAX_FILE_SIZE_MB).await
     }
 
@@ -118,7 +121,7 @@ mod tests {
     #[tokio::test]
     async fn test_file_uploader_new() {
         let (file_path, _dir) = create_test_file_rng_filled(1024).await;
-        let uploader = FileUploader::new(&file_path).await;
+        let uploader = FileUploader::new(file_path.to_str().unwrap()).await;
 
         assert!(
             uploader.is_ok(),
@@ -132,7 +135,9 @@ mod tests {
         let max_file_size_mb = 1;
         let (file_path, _dir) =
             create_test_file_zero_filled(max_file_size_mb * 1024 * 1024 + 1).await;
-        let uploader = FileUploader::new_with_max_file_size(&file_path, max_file_size_mb).await;
+        let uploader =
+            FileUploader::new_with_max_file_size(file_path.to_str().unwrap(), max_file_size_mb)
+                .await;
         assert!(
             matches!(uploader, Err(ShardingError::FileTooBig)),
             "Expected ShardingError::FileTooBig, got: {:?}",
@@ -144,7 +149,9 @@ mod tests {
     async fn test_file_uploader_get_next_chunk() {
         let file_size = 1024; // size smaller than chunk size!
         let (file_path, _dir) = create_test_file_rng_filled(file_size).await;
-        let mut uploader = FileUploader::new(&file_path).await.unwrap();
+        let mut uploader = FileUploader::new(file_path.to_str().unwrap())
+            .await
+            .unwrap();
         let chunk = uploader.get_next_chunk().await.unwrap();
         assert!(chunk.is_some(), "Expected Some(chunk), got None");
         assert_eq!(
@@ -160,7 +167,9 @@ mod tests {
     #[tokio::test]
     async fn test_file_uploader_get_metadata() {
         let (file_path, _dir) = create_test_file_rng_filled(1024).await;
-        let mut uploader = FileUploader::new(&file_path).await.unwrap();
+        let mut uploader = FileUploader::new(file_path.to_str().unwrap())
+            .await
+            .unwrap();
         let chunk = uploader.get_next_chunk().await.unwrap();
         assert!(chunk.is_some(), "Expected Some(chunk), got None");
         let metadata = uploader.get_metadata().await;
@@ -174,7 +183,9 @@ mod tests {
     #[tokio::test]
     async fn test_file_uploader_get_metadata_fail() {
         let (file_path, _dir) = create_test_file_rng_filled(1024).await;
-        let uploader = FileUploader::new(&file_path).await.unwrap();
+        let uploader = FileUploader::new(file_path.to_str().unwrap())
+            .await
+            .unwrap();
         let metadata = uploader.get_metadata().await;
         assert!(
             metadata.is_err(),

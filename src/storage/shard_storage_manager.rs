@@ -1,7 +1,7 @@
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
+use crate::sharding::common::Chunk;
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
-use crate::storage::file_manager::Chunk;
 use crate::storage::storage_table::StorageTable;
 use std::fs::File;
 use std::io::Write;

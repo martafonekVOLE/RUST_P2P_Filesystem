@@ -8,7 +8,9 @@ use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
-use crate::storage::file_manager::{Chunk, FileManager};
+use crate::sharding::common::Chunk;
+use crate::sharding::uploader::FileUploader;
+use crate::storage::file_manager::FileManager;
 use crate::storage::shard_storage_manager::ShardStorageManager;
 use futures::future::join_all;
 use log::info;
@@ -21,6 +23,8 @@ use tokio::net::{TcpStream, UdpSocket as TokioUdpSocket};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
+
+use anyhow::{bail, Result};
 
 use std::error::Error;
 
@@ -80,7 +84,7 @@ impl Node {
         &self,
         request: Request,
         timeout_milliseconds: u64,
-    ) -> Result<Response, &'static str> {
+    ) -> Result<Response> {
         let request_id = request.request_id;
 
         // Create a one-shot channel that will get the response from the receiving loop
@@ -93,7 +97,7 @@ impl Node {
 
         // Send message
         if let Err(_send_err) = self.message_dispatcher.send_request(request).await {
-            return Err("Unable to send request via dispatcher.");
+            bail!("Unable to send request via dispatcher.");
         }
 
         // Await the response from the channel, with given timeout.
@@ -101,12 +105,12 @@ impl Node {
             // Received something from the channel
             Ok(Ok(response)) => Ok(response),
             // The sender was dropped or otherwise no data came
-            Ok(Err(_)) => Err("No response received on the channel."),
+            Ok(Err(_)) => bail!("No response received on the channel."),
             // Timeout expired
             Err(_) => {
                 // Remove the request from the map
                 self.request_map.remove_request(&request_id).await;
-                Err("Timed out awaiting response.")
+                bail!("Timed out awaiting response.")
             }
         }
     }
@@ -115,11 +119,11 @@ impl Node {
     /// Sends a PING request to the specified node ID.
     /// Awaits a PONG response and returns whether the node is reachable.
     ///
-    pub async fn ping(&self, node_id: Key) -> Result<Response, Box<dyn Error>> {
+    pub async fn ping(&self, node_id: Key) -> Result<Response> {
         // Get the address from the RoutingTable
         let receiver_info = match self.routing_table.read().await.get_nodeinfo(&node_id)? {
             Some(info) => info.clone(),
-            None => return Err("PING failed. Node not in routing table.".into()),
+            None => bail!("PING failed. Node not in routing table."),
         };
 
         let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
@@ -127,7 +131,6 @@ impl Node {
         // Just call the send_request_and_wait method, it will return err if the request fails
         self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
             .await
-            .map_err(|e| e.into())
     }
 
     ///
@@ -135,11 +138,11 @@ impl Node {
     /// This method can only be used if the node is already part of the network. (the node already
     /// successfully underwent the join_network procedure)
     ///
-    pub async fn find_node(&self, target: Key) -> Result<Vec<NodeInfo>, String> {
+    pub async fn find_node(&self, target: Key) -> Result<Vec<NodeInfo>> {
         // Initial resolvers are the alpha closest nodes to the target in our RT
         let initial_resolvers = self.routing_table.read().await.get_alpha_closest(&target)?;
         if initial_resolvers.is_empty() {
-            return Err("No initial resolvers available for find_node resolutions".to_string());
+            bail!("No initial resolvers available for find_node resolutions");
         }
 
         // Inject the initial resolvers into the result buffer
@@ -181,18 +184,20 @@ impl Node {
     ///
     /// Method handling file uploads
     ///
-    pub async fn store(&self, file_path: &str) -> Result<(), &str> {
+    pub async fn store(&self, file_path: &str) -> Result<()> {
         // Step 1: check file existence
         if !self.file_manager.check_file_exists(file_path) {
-            return Err("File not found.");
+            bail!("File not found");
         }
 
         // Step 2: call start sharding
 
+        let mut uploader = FileUploader::new(file_path).await?;
         // Step 3: loop over shards
         loop {
             // Step 3.1: get next shard (todo change this stub into "next")
-            let chunk = FileManager::temp_sharding();
+
+            let chunk = uploader.get_next_chunk().await?;
 
             match chunk {
                 Some(chunk) => {
@@ -205,7 +210,7 @@ impl Node {
                     let ports = self
                         .request_available_port_for_tcp_data_transfer(
                             responsible_nodes,
-                            chunk.clone().get_hash(),
+                            chunk.clone().hash,
                         )
                         .await?;
 
@@ -216,14 +221,15 @@ impl Node {
                         let status = self
                             .establish_tcp_stream_and_send_data(
                                 response.clone(),
-                                chunk.clone().get_data(),
+                                chunk.clone().data,
                             )
                             .await;
                         if let Ok(_) = status {
                             // Step 7: save info to FileManager
+                            // TODO: save filename instead, don't need to store info about each chunk separately.
                             self.file_manager.save_data_sent(
                                 &response.sender,
-                                chunk.clone().get_hash(),
+                                chunk.clone().hash,
                                 SystemTime::now(),
                             );
                             successfully_sent_to.push(response.sender.clone())
@@ -234,7 +240,7 @@ impl Node {
                         println!("Chunk successfully uploaded.");
                     } else {
                         // Future-improvement: Chunk may be sent again to different nodes.
-                        return Err("Chunk was not sent!");
+                        bail!("Chunk was not sent!");
                     }
                 }
                 _ => {
@@ -251,11 +257,8 @@ impl Node {
     async fn get_responsive_nodes_responsible_for_chunk(
         &self,
         chunk: Chunk,
-    ) -> Result<Vec<Response>, &str> {
-        let closest_nodes = self
-            .find_node(chunk.get_hash())
-            .await
-            .expect("No closest nodes.");
+    ) -> Result<Vec<Response>> {
+        let closest_nodes = self.find_node(chunk.hash).await.expect("No closest nodes.");
         let mut responsive_alpha_closest_nodes: Vec<Response> = Vec::new();
 
         // Step 4.1: send STORE request to K nodes
@@ -275,7 +278,7 @@ impl Node {
         }
 
         if responsive_alpha_closest_nodes.len() == 0 {
-            return Err("No responsive nodes.");
+            bail!("No responsive nodes.");
         }
 
         Ok(responsive_alpha_closest_nodes)
@@ -288,7 +291,7 @@ impl Node {
         &self,
         nodes: Vec<Response>,
         key: Key,
-    ) -> Result<Vec<Response>, &str> {
+    ) -> Result<Vec<Response>> {
         let mut ports_responses: Vec<Response> = Vec::new();
         for response in nodes {
             if let Ok(response) = self
@@ -302,7 +305,7 @@ impl Node {
         }
 
         if ports_responses.len() == 0 {
-            return Err("No port returned from nodes.");
+            bail!("No port returned from nodes.");
         }
 
         Ok(ports_responses)
@@ -311,7 +314,7 @@ impl Node {
     ///
     /// Send initial STORE request to a node
     ///
-    async fn send_initial_store_request(&self, node_info: NodeInfo) -> Result<Response, &str> {
+    async fn send_initial_store_request(&self, node_info: NodeInfo) -> Result<Response> {
         let request = Request::new(RequestType::Store, self.to_node_info(), node_info);
 
         // Just call the send_request_and_wait method, it will return err if the request fails
@@ -322,11 +325,7 @@ impl Node {
     ///
     /// Send STORE PORT request
     ///
-    async fn send_store_port_request(
-        &self,
-        node_info: NodeInfo,
-        key: Key,
-    ) -> Result<Response, &str> {
+    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Result<Response> {
         let request = Request::new(
             RequestType::StorePort { file_id: key },
             self.to_node_info(),
@@ -344,7 +343,7 @@ impl Node {
         &self,
         response: Response,
         data: Vec<u8>,
-    ) -> Result<(), &str> {
+    ) -> Result<()> {
         if let (ResponseType::StorePortOK { port }) = response.response_type {
             let address =
                 response.sender.address.ip().to_string() + ":" + port.to_string().as_str();
@@ -359,7 +358,7 @@ impl Node {
 
             Ok(())
         } else {
-            Err("Unable to establish TCP stream.")
+            bail!("Unable to establish TCP stream.")
         }
     }
 
@@ -369,7 +368,7 @@ impl Node {
     /// After successfully joining the network, the responsive nodes are stored in the routing table
     /// and the Node is ready to participate in the network.
     ///
-    pub async fn join_network(&self, beacon_node: NodeInfo) -> Result<Vec<NodeInfo>, String> {
+    pub async fn join_network(&self, beacon_node: NodeInfo) -> Result<Vec<NodeInfo>> {
         info!(
             "Beginning join_network procedure via beacon {}",
             beacon_node.id
@@ -380,7 +379,7 @@ impl Node {
             .store_nodeinfo(beacon_node.clone())
             .expect("Failed to add beacon node to RT");
 
-        self.ping(beacon_node.id).await.map_err(|e| e.to_string())?;
+        self.ping(beacon_node.id).await?;
 
         // Send single find_node to the beacon to get the initial k-closest nodes
         let mut initial_k_closest = self
@@ -389,7 +388,7 @@ impl Node {
             .get_k_closest();
 
         if initial_k_closest.is_empty() {
-            return Err("Failed to join network. Beacon node did not respond.".to_string());
+            bail!("Failed to join network. Beacon node did not respond.");
         }
 
         // In case we are the second node in the network, the response only contains us. Therefore,

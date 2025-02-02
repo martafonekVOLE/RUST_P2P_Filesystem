@@ -75,7 +75,9 @@ mod tests {
     #[tokio::test]
     async fn test_file_downloader_new() {
         let (file_path, _dir) = create_test_file_rng_filled(1024).await;
-        let mut uploader = FileUploader::new(&file_path).await.unwrap();
+        let mut uploader = FileUploader::new(file_path.to_str().unwrap())
+            .await
+            .unwrap();
         uploader.get_next_chunk().await.unwrap();
         let metadata = uploader.get_metadata().await.unwrap();
         let output_dir = tempdir().unwrap();
@@ -91,7 +93,9 @@ mod tests {
     #[tokio::test]
     async fn test_file_downloader_store_next_chunk() {
         let (file_path, _dir) = create_test_file_rng_filled(1024).await;
-        let mut uploader = FileUploader::new(&file_path).await.unwrap();
+        let mut uploader = FileUploader::new(file_path.to_str().unwrap())
+            .await
+            .unwrap();
         let chunk = uploader.get_next_chunk().await.unwrap().unwrap();
         let metadata = uploader.get_metadata().await.unwrap();
         let output_dir = tempdir().unwrap();
@@ -110,7 +114,9 @@ mod tests {
     #[tokio::test]
     async fn test_file_downloader_store_unwanted_chunk() {
         let (file_path, _dir) = create_test_file_rng_filled(1024).await;
-        let mut uploader = FileUploader::new(&file_path).await.unwrap();
+        let mut uploader = FileUploader::new(file_path.to_str().unwrap())
+            .await
+            .unwrap();
         let chunk = uploader.get_next_chunk().await.unwrap().unwrap();
         let metadata = uploader.get_metadata().await.unwrap();
         let output_dir = tempdir().unwrap();

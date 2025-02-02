@@ -33,6 +33,7 @@ pub enum ShardingError {
     ChunkHashMismatch,
 }
 
+#[derive(Clone)]
 pub struct Chunk {
     pub data: Vec<u8>,
     pub hash: Hash, // TODO: maybe don't need to pass to external modules,
