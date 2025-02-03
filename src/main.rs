@@ -1,22 +1,14 @@
 mod cli;
-mod config;
-mod constants;
-mod core;
-mod networking;
-mod routing;
-mod sharding;
-mod storage;
-mod utils;
 
-use crate::constants::K;
-use crate::core::key::Key;
-use crate::core::node::Node;
-use crate::networking::node_info::NodeInfo;
 use clap::builder::TypedValueParser;
 use clap::Parser;
 use cli::args::Arguments;
-use config::Config;
 use log::{error, info, warn, LevelFilter};
+use p2p::config::Config;
+use p2p::constants::K;
+use p2p::core::key::Key;
+use p2p::core::node::Node;
+use p2p::networking::node_info::NodeInfo;
 use p2p::utils::logging::init_logging;
 use public_ip;
 use std::io::BufRead;
@@ -50,7 +42,7 @@ async fn main() {
         .expect("Configuration error: node_port is missing or invalid.");
 
     // Create node
-    let node = Node::new(Key::new_random(), ip.to_string(), port).await;
+    let node = Node::new(Key::new_random(), ip.to_string(), port, config.storage_path).await;
 
     // Begin listening for incoming network traffic
     node.start_listening();
@@ -136,6 +128,17 @@ async fn main() {
                     eprintln!("Invalid node ID: {}", e);
                 }
             },
+            "store" if parts.len() == 3 => {
+                let file_path = parts[1];
+                match node.store(file_path).await {
+                    Ok(()) => {
+                        println!("Successfully stored!");
+                    }
+                    Err(e) => {
+                        println!("Failed to store: {}", e);
+                    }
+                }
+            }
             "dump_rt" if parts.len() == 1 => {
                 let all_contacts = node.get_routing_table_content().await;
                 println!("Routing table content:");

@@ -1,0 +1,55 @@
+use crate::core::key::Key as Hash;
+use rand::Rng;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::{self, BufReader};
+use std::path::Path;
+use thiserror::Error;
+
+// Actual size of the chunk will be 16 bytes longer
+// because of auth tag on encyrpted message.
+// These constants just represent how much will be read from file to fill the chunk
+pub const CHUNK_READ_KB_SMALL: usize = 512; // KB
+pub const CHUNK_READ_KB_LARGE: usize = 1024; // KB
+
+pub const MAX_FILE_SIZE_MB: usize = 4096; // 4 GB
+pub const LARGE_FILE_THRESHOLD_MB: usize = 1024; // 1 GB
+
+#[derive(Error, Debug)]
+pub enum ShardingError {
+    #[error("IO error")]
+    Io(#[from] io::Error),
+    #[error("File is too big to be uploaded to the network")]
+    FileTooBig,
+    #[error("File was not read completely")]
+    MetadataNotFilled,
+    #[error("Failed to encrypt chunk")]
+    EncryptionFailed,
+    #[error("Failed to decrypt chunk")]
+    DecryptionFailed,
+    #[error("Unwanted chunk. Metadata for chunk not found")]
+    UnwantedChunk,
+    #[error("Hash mismatch between metadata and chunk")]
+    ChunkHashMismatch,
+}
+
+#[derive(Clone)]
+pub struct Chunk {
+    pub data: Vec<u8>,
+    pub hash: Hash, // TODO: maybe don't need to pass to external modules,
+                    // because no need to verify it, AEAD auth tag already ensures integrity
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChunkMetadata {
+    pub hash: Hash,
+    pub nonce: Vec<u8>, // Is required to decrypt the message. 12-byte long unique value.
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileMetadata {
+    pub name: String,
+    pub size: usize,
+    pub encryption_key: Vec<u8>,
+    pub chunks_metadata: Vec<ChunkMetadata>,
+}
