@@ -128,7 +128,7 @@ async fn main() {
                     eprintln!("Invalid node ID: {}", e);
                 }
             },
-            "store" if parts.len() == 3 => {
+            "store" if parts.len() == 2 => {
                 let file_path = parts[1];
                 match node.store(file_path).await {
                     Ok(()) => {

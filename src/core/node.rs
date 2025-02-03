@@ -26,7 +26,7 @@ use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 
 use futures::FutureExt;
 use std::error::Error;
@@ -191,7 +191,10 @@ impl Node {
     ///
     pub async fn store(&self, file_path: &str) -> Result<()> {
         // Step 1: check file existence
-        fs::exists(file_path).expect("Trying to upload file which does not exist");
+        let file_exists = fs::exists(file_path).expect("Unable to check file existence.");
+        if !file_exists {
+            return Err(anyhow!("Unable to open specified file. Check the path."));
+        }
 
         // Step 2: call start sharding
         let mut uploader = FileUploader::new(file_path).await?;
@@ -209,12 +212,13 @@ impl Node {
                         .await?;
 
                     // Step 5: get ports for TCP data transfer
-                    let ports = self
-                        .request_available_port_for_tcp_data_transfer(
-                            responsible_nodes,
-                            chunk.clone().hash,
-                        )
+                    let mut ports = self
+                        .get_ports_for_nodes(responsible_nodes, chunk.clone().hash)
                         .await?;
+
+                    if ports.len() == 0 {
+                        bail!("No port returned from nodes.");
+                    }
 
                     let mut successfully_sent_to: Vec<NodeInfo> = Vec::new();
 
@@ -254,13 +258,18 @@ impl Node {
     /// Get ALPHA most responsive closest nodes for provided chunk.
     ///
     async fn get_closest_nodes_responsible_for_chunk(&self, chunk: Chunk) -> Result<Vec<Response>> {
-        let closest_nodes = self.find_node(chunk.hash).await.expect("No closest nodes.");
+        let closest_nodes = self
+            .find_node(chunk.clone().hash)
+            .await
+            .expect("No closest nodes.");
 
         // Responsive nodes which did respond to initial request with StoreOK
-        let mut responsive_nodes = self.get_responsive_nodes_round(closest_nodes).await;
+        let mut responsive_nodes = self
+            .get_responsive_nodes_round(closest_nodes, chunk.hash)
+            .await;
 
         if responsive_nodes.len() == 0 {
-            bail!("No responsive nodes.");
+            bail!("Unable to store file. No responsive nodes.");
         }
 
         responsive_nodes.sort_by(|a, b| {
@@ -278,39 +287,49 @@ impl Node {
     }
 
     ///
+    ///
+    ///
+    async fn get_ports_for_nodes(&self, nodes: Vec<Response>, key: Key) -> Result<Vec<Response>> {
+        // Responsive nodes which did respond to initial request with StoreOK
+        let mut responsive_nodes = self
+            .request_available_ports_for_tcp_data_transfer(nodes, key)
+            .await;
+
+        if responsive_nodes.len() == 0 {
+            bail!("Unable to store file. No nodes are ready to accept TCP data transfer.");
+        }
+
+        // take ALPHA nodes which XOR distance it the smallest
+        let flatten = responsive_nodes.into_iter().flatten().collect();
+        Ok(flatten)
+    }
+    ///
     /// Receive ports for establishing TCP connection
     ///
-    async fn request_available_port_for_tcp_data_transfer(
+    async fn request_available_ports_for_tcp_data_transfer(
         &self,
         nodes: Vec<Response>,
         key: Key,
-    ) -> Result<Vec<Response>> {
-        let mut ports_responses: Vec<Response> = Vec::new();
-        for response in nodes {
-            if let Ok(response) = self
-                .send_store_port_request(response.sender, key.clone())
-                .await
-            {
-                if let (ResponseType::StorePortOK { port }) = response.response_type {
-                    ports_responses.push(response);
-                }
-            }
-        }
+    ) -> Vec<Option<Response>> {
+        let nodes_with_ports = nodes
+            .into_iter()
+            .map(|closest_node| self.send_store_port_request(closest_node.sender, key))
+            .collect::<Vec<_>>();
 
-        if ports_responses.len() == 0 {
-            bail!("No port returned from nodes.");
-        }
-
-        Ok(ports_responses)
+        join_all(nodes_with_ports).await
     }
 
     ///
     ///
     ///
-    async fn get_responsive_nodes_round(&self, nodes: Vec<NodeInfo>) -> Vec<Option<Response>> {
+    async fn get_responsive_nodes_round(
+        &self,
+        nodes: Vec<NodeInfo>,
+        file_id: Key,
+    ) -> Vec<Option<Response>> {
         let responsive_nodes = nodes
             .into_iter()
-            .map(|closest_node| self.send_initial_store_request(closest_node))
+            .map(|closest_node| self.send_initial_store_request(closest_node, file_id))
             .collect::<Vec<_>>();
 
         // Run all lookups in parallel
@@ -320,15 +339,30 @@ impl Node {
     ///
     /// Send initial STORE request to a node
     ///
-    async fn send_initial_store_request(&self, node_info: NodeInfo) -> Option<Response> {
-        let request = Request::new(RequestType::Store, self.to_node_info(), node_info);
+    async fn send_initial_store_request(
+        &self,
+        node_info: NodeInfo,
+        file_id: Key,
+    ) -> Option<Response> {
+        let request = Request::new(
+            RequestType::Store { file_id },
+            self.to_node_info(),
+            node_info,
+        );
 
         // Just call the send_request_and_wait method, it will return err if the request fails
         match self
             .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
             .await
         {
-            Ok(response) if response.response_type == ResponseType::StoreOK => Some(response),
+            Ok(response) if response.response_type == ResponseType::StoreOK => {
+                info!("Node '{}' is ready to accept data.", response.sender.id);
+                Some(response)
+            }
+            Ok(response) if response.response_type == ResponseType::StoreChunkUpdated => {
+                info!("Node '{}' updated the data.", response.sender.id);
+                None
+            }
             _ => None,
         }
     }
@@ -336,15 +370,25 @@ impl Node {
     ///
     /// Send STORE PORT request
     ///
-    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Result<Response> {
+    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Option<Response> {
         let request = Request::new(
             RequestType::StorePort { file_id: key },
             self.to_node_info(),
             node_info,
         );
 
-        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+        match self
+            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
             .await
+        {
+            Ok(response) => {
+                if let ResponseType::StorePortOK { port } = response.response_type {
+                    return Some(response);
+                };
+                None
+            }
+            _ => None,
+        }
     }
 
     ///

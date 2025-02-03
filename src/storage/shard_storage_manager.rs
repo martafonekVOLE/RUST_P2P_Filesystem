@@ -3,7 +3,7 @@ use crate::networking::node_info::NodeInfo;
 use crate::sharding::common::{Chunk, CHUNK_SIZE_KB_LARGE, CHUNK_SIZE_KB_SMALL};
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
 use crate::utils::testing::to_unix_path;
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -19,6 +19,12 @@ const DEFAULT_CHUNK_EXPIRE_TIME_S: u64 = 86400; // 24 h
 
 pub struct StoredChunkInfo {
     pub time_stored: SystemTime,
+}
+
+impl StoredChunkInfo {
+    pub fn update_time(&mut self, time: SystemTime) {
+        self.time_stored = time;
+    }
 }
 
 pub struct ShardStorageManager {
@@ -55,6 +61,7 @@ impl ShardStorageManager {
                     bail!("Max number of shards exceeded");
                 }
                 let chunk_size = data.len();
+                println!("CHUNKSIZE: {}", chunk_size);
                 if chunk_size != CHUNK_SIZE_KB_SMALL && chunk_size != CHUNK_SIZE_KB_LARGE {
                     bail!("Invalid chunk size");
                 }
@@ -152,6 +159,18 @@ impl ShardStorageManager {
 
     pub fn get_data_transfers_table(&self) -> &DataTransfersTable {
         &self.data_transfers_table
+    }
+
+    pub fn update_chunk_upload_time(&mut self, hash: &Hash) -> Result<()> {
+        let mut chunk = self.owned_chunks.get_mut(hash);
+
+        match chunk {
+            Some(chunk_info) => {
+                chunk_info.update_time(SystemTime::now());
+                Ok(())
+            }
+            None => Err(anyhow!("Chunk not found in storage")),
+        }
     }
 }
 

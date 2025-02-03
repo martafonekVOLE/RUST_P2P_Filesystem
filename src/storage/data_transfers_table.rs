@@ -1,7 +1,9 @@
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
+use log::error;
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct DataTransfer {
     pub sender: NodeInfo,
     pub chunk_hash: Key,
