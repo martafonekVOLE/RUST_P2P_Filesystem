@@ -12,7 +12,7 @@ use crate::sharding::common::Chunk;
 use crate::sharding::uploader::FileUploader;
 use crate::storage::file_manager::FileManager;
 use crate::storage::shard_storage_manager::ShardStorageManager;
-use futures::future::join_all;
+use futures::future::{join_all, ready};
 use log::info;
 use std::cmp::PartialEq;
 use std::fs;
@@ -28,6 +28,7 @@ use tokio::time::{timeout, Duration};
 
 use anyhow::{bail, Result};
 
+use futures::FutureExt;
 use std::error::Error;
 
 pub struct Node {
@@ -197,15 +198,14 @@ impl Node {
 
         // Step 3: loop over shards
         loop {
-            // Step 3.1: get next shard (todo change this stub into "next")
-
+            // Step 3.1: get next shard
             let chunk = uploader.get_next_chunk().await?;
 
             match chunk {
                 Some(chunk) => {
-                    // Step 4: get ALPHA nodes responsible for the chunk
+                    // Step 4: get the ALPHA closest nodes responsible for the chunk
                     let responsible_nodes = self
-                        .get_responsive_nodes_responsible_for_chunk(chunk.clone())
+                        .get_closest_nodes_responsible_for_chunk(chunk.clone())
                         .await?;
 
                     // Step 5: get ports for TCP data transfer
@@ -253,34 +253,28 @@ impl Node {
     ///
     /// Get ALPHA most responsive closest nodes for provided chunk.
     ///
-    async fn get_responsive_nodes_responsible_for_chunk(
-        &self,
-        chunk: Chunk,
-    ) -> Result<Vec<Response>> {
+    async fn get_closest_nodes_responsible_for_chunk(&self, chunk: Chunk) -> Result<Vec<Response>> {
         let closest_nodes = self.find_node(chunk.hash).await.expect("No closest nodes.");
-        let mut responsive_alpha_closest_nodes: Vec<Response> = Vec::new();
 
-        // Step 4.1: send STORE request to K nodes
-        for node in closest_nodes {
-            // Future-improvement: we can update K-bucket with responsive nodes or remove ones which did not respond
-            // NOTE: reponsive nodes already added in find-node.
-            if let Ok(response) = self.send_initial_store_request(node).await {
-                if response.response_type == ResponseType::StoreOK {
-                    // Step 4.2: take ALPHA responsive nodes (future-improvement: take fastest)
-                    responsive_alpha_closest_nodes.push(response);
-                }
-            }
+        // Responsive nodes which did respond to initial request with StoreOK
+        let mut responsive_nodes = self.get_responsive_nodes_round(closest_nodes).await;
 
-            if responsive_alpha_closest_nodes.len() >= ALPHA {
-                break;
-            }
-        }
-
-        if responsive_alpha_closest_nodes.len() == 0 {
+        if responsive_nodes.len() == 0 {
             bail!("No responsive nodes.");
         }
 
-        Ok(responsive_alpha_closest_nodes)
+        responsive_nodes.sort_by(|a, b| {
+            // Unwrap can be used here, because get_responsive_nodes_round does return
+            // only valid responses as Some(response)
+            let dist_a = a.clone().unwrap().sender.id.distance(&chunk.hash);
+            let dist_b = b.clone().unwrap().sender.id.distance(&chunk.hash);
+            dist_a.cmp(&dist_b)
+        });
+
+        // take ALPHA nodes which XOR distance it the smallest
+        let alpha_nodes = responsive_nodes.into_iter().flatten().take(ALPHA).collect();
+
+        Ok(alpha_nodes)
     }
 
     ///
@@ -311,14 +305,32 @@ impl Node {
     }
 
     ///
+    ///
+    ///
+    async fn get_responsive_nodes_round(&self, nodes: Vec<NodeInfo>) -> Vec<Option<Response>> {
+        let responsive_nodes = nodes
+            .into_iter()
+            .map(|closest_node| self.send_initial_store_request(closest_node))
+            .collect::<Vec<_>>();
+
+        // Run all lookups in parallel
+        join_all(responsive_nodes).await
+    }
+
+    ///
     /// Send initial STORE request to a node
     ///
-    async fn send_initial_store_request(&self, node_info: NodeInfo) -> Result<Response> {
+    async fn send_initial_store_request(&self, node_info: NodeInfo) -> Option<Response> {
         let request = Request::new(RequestType::Store, self.to_node_info(), node_info);
 
         // Just call the send_request_and_wait method, it will return err if the request fails
-        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+        match self
+            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
             .await
+        {
+            Ok(response) if response.response_type == ResponseType::StoreOK => Some(response),
+            _ => None,
+        }
     }
 
     ///
