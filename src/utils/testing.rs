@@ -35,3 +35,8 @@ pub async fn create_test_file_zero_filled(size: usize) -> (PathBuf, tempfile::Te
 pub async fn create_test_file_empty() -> (PathBuf, tempfile::TempDir) {
     create_test_file(None, false).await
 }
+
+/// Converts any given path to a Unix-style path
+pub fn to_unix_path(path: String) -> String {
+    path.replace("\\", "/")
+}

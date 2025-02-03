@@ -119,14 +119,18 @@ async fn handle_find_node_message(
     }
 }
 
+///
+/// Handles STORE request
+/// Saves received chunk to the file system and adds entry to ShardManager's map
+///
 async fn handle_store_message(
     this_node_info: NodeInfo,
     request: Request,
     message_dispatcher: MessageDispatcher,
 ) {
     // TODO: check first if chunk with this hash is already stored,
-    // in this case send response that chunk is already stored and just updated TTL or smth.
-    
+    // in this case send response that chunk is already stored and just update TTL or smth.
+
     // Respond with a StoreOK message.
     let response = Response::new(
         ResponseType::StoreOK,
@@ -200,7 +204,8 @@ async fn handle_store_port_message(
                         shard_storage_manager
                             .write()
                             .await
-                            .save_for_port(data, port)
+                            .store_chunk_for_known_peer(data, port)
+                            .await
                             .expect("Failed to save shard to storage");
                     }
                     Err(_) => {

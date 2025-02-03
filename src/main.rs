@@ -42,7 +42,7 @@ async fn main() {
         .expect("Configuration error: node_port is missing or invalid.");
 
     // Create node
-    let node = Node::new(Key::new_random(), ip.to_string(), port, config.storage_path).await;
+    let mut node = Node::new(Key::new_random(), ip.to_string(), port, config.storage_path).await;
 
     // Begin listening for incoming network traffic
     node.start_listening();

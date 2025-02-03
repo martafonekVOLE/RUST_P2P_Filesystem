@@ -15,7 +15,9 @@ use crate::storage::shard_storage_manager::ShardStorageManager;
 use futures::future::join_all;
 use log::info;
 use std::cmp::PartialEq;
+use std::fs;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
@@ -35,7 +37,7 @@ pub struct Node {
     routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
     message_dispatcher: Arc<MessageDispatcher>,
-    file_manager: FileManager,
+    file_manager: Arc<FileManager>,
     shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
 }
 
@@ -55,8 +57,10 @@ impl Node {
             routing_table: Arc::new(RwLock::new(RoutingTable::new(key))),
             request_map: RequestMap::new(),
             message_dispatcher: Arc::new(MessageDispatcher::new().await),
-            file_manager: FileManager::new(),
-            shard_storage_manager: Arc::new(RwLock::new(ShardStorageManager::new(storage_path))),
+            file_manager: Arc::new(FileManager::new()),
+            shard_storage_manager: Arc::new(RwLock::new(ShardStorageManager::new(PathBuf::from(
+                storage_path,
+            )))),
         }
     }
 
@@ -186,13 +190,11 @@ impl Node {
     ///
     pub async fn store(&self, file_path: &str) -> Result<()> {
         // Step 1: check file existence
-        if !self.file_manager.check_file_exists(file_path) {
-            bail!("File not found");
-        }
+        fs::exists(file_path).expect("Trying to upload file which does not exist");
 
         // Step 2: call start sharding
-
         let mut uploader = FileUploader::new(file_path).await?;
+
         // Step 3: loop over shards
         loop {
             // Step 3.1: get next shard (todo change this stub into "next")
@@ -225,13 +227,6 @@ impl Node {
                             )
                             .await;
                         if let Ok(_) = status {
-                            // Step 7: save info to FileManager
-                            // TODO: save filename instead, don't need to store info about each chunk separately.
-                            self.file_manager.save_data_sent(
-                                &response.sender,
-                                chunk.clone().hash,
-                                SystemTime::now(),
-                            );
                             successfully_sent_to.push(response.sender.clone())
                         }
                     }
@@ -243,12 +238,16 @@ impl Node {
                         bail!("Chunk was not sent!");
                     }
                 }
-                _ => {
-                    // Step 8: Close file descriptor
-                    return Ok(());
+                None => {
+                    break;
                 }
             }
         }
+
+        // Step 7: save info to FileManager
+        self.file_manager.add_file_uploaded_entry(file_path).await;
+
+        Ok(())
     }
 
     ///

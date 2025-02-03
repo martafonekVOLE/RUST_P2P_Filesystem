@@ -1,3 +1,4 @@
+use super::encryption::AES_GCM_AUTH_TAG_SIZE;
 use crate::core::key::Key as Hash;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,9 @@ use thiserror::Error;
 // These constants just represent how much will be read from file to fill the chunk
 pub const CHUNK_READ_KB_SMALL: usize = 512; // KB
 pub const CHUNK_READ_KB_LARGE: usize = 1024; // KB
+
+pub const CHUNK_SIZE_KB_SMALL: usize = CHUNK_READ_KB_SMALL + AES_GCM_AUTH_TAG_SIZE; // KB
+pub const CHUNK_SIZE_KB_LARGE: usize = CHUNK_READ_KB_LARGE + AES_GCM_AUTH_TAG_SIZE; // KB
 
 pub const MAX_FILE_SIZE_MB: usize = 4096; // 4 GB
 pub const LARGE_FILE_THRESHOLD_MB: usize = 1024; // 1 GB
@@ -49,7 +53,7 @@ pub struct ChunkMetadata {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileMetadata {
     pub name: String,
-    pub size: usize,
+    pub size: usize, // E.g. to know which chunk size to expect
     pub encryption_key: Vec<u8>,
     pub chunks_metadata: Vec<ChunkMetadata>,
 }
