@@ -50,7 +50,16 @@ pub async fn handle_received_request(
             )
             .await;
         }
-        RequestType::Store => {}
+        RequestType::Store { file_id } => {
+            handle_store_message(
+                this_node_info,
+                request,
+                message_dispatcher,
+                shard_storage_manager,
+                file_id,
+            )
+            .await;
+        }
         RequestType::StorePort { file_id } => {
             handle_store_port_message(
                 this_node_info,
@@ -119,21 +128,47 @@ async fn handle_find_node_message(
     }
 }
 
+///
+/// Handles STORE request
+/// Saves received chunk to the file system and adds entry to ShardManager's map
+///
 async fn handle_store_message(
     this_node_info: NodeInfo,
     request: Request,
-    message_dispatcher: MessageDispatcher,
+    message_dispatcher: Arc<MessageDispatcher>,
+    shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
+    file_id: Key,
 ) {
     // TODO: check first if chunk with this hash is already stored,
-    // in this case send response that chunk is already stored and just updated TTL or smth.
-    
-    // Respond with a StoreOK message.
-    let response = Response::new(
-        ResponseType::StoreOK,
-        this_node_info,         // Sender field
-        request.sender.clone(), // Receiver field
-        request.request_id,
-    );
+    // in this case send response that chunk is already stored and just update TTL or smth.
+    let chunk_exists = shard_storage_manager
+        .read()
+        .await
+        .is_chunk_already_stored(&file_id);
+    let response = match chunk_exists {
+        false => {
+            Response::new(
+                ResponseType::StoreOK,
+                this_node_info,         // Sender field
+                request.sender.clone(), // Receiver field
+                request.request_id,
+            )
+        }
+        true => {
+            shard_storage_manager
+                .write()
+                .await
+                .update_chunk_upload_time(&file_id)
+                .expect("Unable to update TTL.");
+
+            Response::new(
+                ResponseType::StoreChunkUpdated,
+                this_node_info,         // Sender field
+                request.sender.clone(), // Receiver field
+                request.request_id,
+            )
+        }
+    };
 
     if let Err(e) = message_dispatcher.send_response(response).await {
         error!("Failed to send StoreOK response: {}", e);
@@ -167,12 +202,41 @@ async fn handle_store_port_message(
     let port = socket_address.port();
 
     // Store node into active TCP connections
-    if let None = shard_storage_manager
+    let insert = shard_storage_manager
         .write()
         .await
-        .add_active_tcp_connection(port, request.sender.clone(), file_id.clone())
-    {
-        error!("Unable to receive data, nothing was saved to active TCP connections table.")
+        .add_active_tcp_connection(port, request.sender.clone(), file_id.clone());
+
+    if insert.is_some() {
+        loop {
+            let tcp_listener = match TcpListener::bind("127.0.0.1:0").await {
+                Ok(listener) => listener,
+                Err(e) => {
+                    error!("Error opening TCP Listener.");
+                    return;
+                }
+            };
+
+            let socket_address = match tcp_listener.local_addr() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    error!("Error reading Socket Address.");
+                    return;
+                }
+            };
+
+            let port = socket_address.port();
+
+            // Store node into active TCP connections
+            let insert = shard_storage_manager
+                .write()
+                .await
+                .add_active_tcp_connection(port, request.sender.clone(), file_id.clone());
+
+            if insert.is_none() {
+                break;
+            }
+        }
     }
 
     // Respond with a STORE_OK message.
@@ -200,7 +264,8 @@ async fn handle_store_port_message(
                         shard_storage_manager
                             .write()
                             .await
-                            .save_for_port(data, port)
+                            .store_chunk_for_known_peer(data, port)
+                            .await
                             .expect("Failed to save shard to storage");
                     }
                     Err(_) => {

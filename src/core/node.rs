@@ -12,10 +12,12 @@ use crate::sharding::common::Chunk;
 use crate::sharding::uploader::FileUploader;
 use crate::storage::file_manager::FileManager;
 use crate::storage::shard_storage_manager::ShardStorageManager;
-use futures::future::join_all;
+use futures::future::{join_all, ready};
 use log::info;
 use std::cmp::PartialEq;
+use std::fs;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
@@ -24,8 +26,9 @@ use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 
+use futures::FutureExt;
 use std::error::Error;
 
 pub struct Node {
@@ -35,7 +38,7 @@ pub struct Node {
     routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
     message_dispatcher: Arc<MessageDispatcher>,
-    file_manager: FileManager,
+    file_manager: Arc<FileManager>,
     shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
 }
 
@@ -55,8 +58,10 @@ impl Node {
             routing_table: Arc::new(RwLock::new(RoutingTable::new(key))),
             request_map: RequestMap::new(),
             message_dispatcher: Arc::new(MessageDispatcher::new().await),
-            file_manager: FileManager::new(),
-            shard_storage_manager: Arc::new(RwLock::new(ShardStorageManager::new(storage_path))),
+            file_manager: Arc::new(FileManager::new()),
+            shard_storage_manager: Arc::new(RwLock::new(ShardStorageManager::new(PathBuf::from(
+                storage_path,
+            )))),
         }
     }
 
@@ -186,154 +191,202 @@ impl Node {
     ///
     pub async fn store(&self, file_path: &str) -> Result<()> {
         // Step 1: check file existence
-        if !self.file_manager.check_file_exists(file_path) {
-            bail!("File not found");
+        let file_exists = fs::exists(file_path).expect("Unable to check file existence.");
+        if !file_exists {
+            return Err(anyhow!("Unable to open specified file. Check the path."));
         }
 
         // Step 2: call start sharding
-
         let mut uploader = FileUploader::new(file_path).await?;
+
         // Step 3: loop over shards
         loop {
-            // Step 3.1: get next shard (todo change this stub into "next")
-
+            // Step 3.1: get next shard
             let chunk = uploader.get_next_chunk().await?;
 
             match chunk {
                 Some(chunk) => {
-                    // Step 4: get ALPHA nodes responsible for the chunk
+                    // Step 4: get the ALPHA closest nodes responsible for the chunk
                     let responsible_nodes = self
-                        .get_responsive_nodes_responsible_for_chunk(chunk.clone())
+                        .get_closest_nodes_responsible_for_chunk(chunk.clone())
                         .await?;
 
                     // Step 5: get ports for TCP data transfer
-                    let ports = self
-                        .request_available_port_for_tcp_data_transfer(
-                            responsible_nodes,
-                            chunk.clone().hash,
-                        )
+                    let mut ports = self
+                        .get_ports_for_nodes(responsible_nodes, chunk.clone().hash)
                         .await?;
 
-                    let mut successfully_sent_to: Vec<NodeInfo> = Vec::new();
-
-                    // Step 6: send data to each node over TCP
-                    for response in ports {
-                        let status = self
-                            .establish_tcp_stream_and_send_data(
-                                response.clone(),
-                                chunk.clone().data,
-                            )
-                            .await;
-                        if let Ok(_) = status {
-                            // Step 7: save info to FileManager
-                            // TODO: save filename instead, don't need to store info about each chunk separately.
-                            self.file_manager.save_data_sent(
-                                &response.sender,
-                                chunk.clone().hash,
-                                SystemTime::now(),
-                            );
-                            successfully_sent_to.push(response.sender.clone())
-                        }
+                    if ports.len() == 0 {
+                        bail!("No port returned from nodes.");
                     }
 
-                    if successfully_sent_to.len() > 0 {
+                    // Step 6: send data to each node over TCP
+                    let established_connection = ports
+                        .into_iter()
+                        .map(|node_with_port| {
+                            self.establish_tcp_stream_and_send_data(
+                                node_with_port.clone(),
+                                chunk.clone().data,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+
+                    let sent_to_nodes = join_all(established_connection).await;
+
+                    if sent_to_nodes.len() > 0 {
                         println!("Chunk successfully uploaded.");
                     } else {
                         // Future-improvement: Chunk may be sent again to different nodes.
                         bail!("Chunk was not sent!");
                     }
                 }
-                _ => {
-                    // Step 8: Close file descriptor
-                    return Ok(());
+                None => {
+                    break;
                 }
             }
         }
+
+        // Step 7: save info to FileManager
+        self.file_manager.add_file_uploaded_entry(file_path).await;
+
+        Ok(())
     }
 
     ///
     /// Get ALPHA most responsive closest nodes for provided chunk.
     ///
-    async fn get_responsive_nodes_responsible_for_chunk(
-        &self,
-        chunk: Chunk,
-    ) -> Result<Vec<Response>> {
-        let closest_nodes = self.find_node(chunk.hash).await.expect("No closest nodes.");
-        let mut responsive_alpha_closest_nodes: Vec<Response> = Vec::new();
+    async fn get_closest_nodes_responsible_for_chunk(&self, chunk: Chunk) -> Result<Vec<Response>> {
+        let closest_nodes = self
+            .find_node(chunk.clone().hash)
+            .await
+            .expect("No closest nodes.");
 
-        // Step 4.1: send STORE request to K nodes
-        for node in closest_nodes {
-            // Future-improvement: we can update K-bucket with responsive nodes or remove ones which did not respond
-            // NOTE: reponsive nodes already added in find-node.
-            if let Ok(response) = self.send_initial_store_request(node).await {
-                if response.response_type == ResponseType::StoreOK {
-                    // Step 4.2: take ALPHA responsive nodes (future-improvement: take fastest)
-                    responsive_alpha_closest_nodes.push(response);
-                }
-            }
+        // Responsive nodes which did respond to initial request with StoreOK
+        let mut responsive_nodes = self
+            .get_responsive_nodes_round(closest_nodes, chunk.hash)
+            .await;
 
-            if responsive_alpha_closest_nodes.len() >= ALPHA {
-                break;
-            }
+        if responsive_nodes.len() == 0 {
+            bail!("Unable to store file. No responsive nodes.");
         }
 
-        if responsive_alpha_closest_nodes.len() == 0 {
-            bail!("No responsive nodes.");
-        }
+        responsive_nodes.sort_by(|a, b| {
+            // Unwrap can be used here, because get_responsive_nodes_round does return
+            // only valid responses as Some(response)
+            let dist_a = a.clone().unwrap().sender.id.distance(&chunk.hash);
+            let dist_b = b.clone().unwrap().sender.id.distance(&chunk.hash);
+            dist_a.cmp(&dist_b)
+        });
 
-        Ok(responsive_alpha_closest_nodes)
+        // take ALPHA nodes which XOR distance it the smallest
+        let alpha_nodes = responsive_nodes.into_iter().flatten().take(ALPHA).collect();
+
+        Ok(alpha_nodes)
     }
 
     ///
+    ///
+    ///
+    async fn get_ports_for_nodes(&self, nodes: Vec<Response>, key: Key) -> Result<Vec<Response>> {
+        // Responsive nodes which did respond to initial request with StoreOK
+        let mut responsive_nodes = self
+            .request_available_ports_for_tcp_data_transfer(nodes, key)
+            .await;
+
+        if responsive_nodes.len() == 0 {
+            bail!("Unable to store file. No nodes are ready to accept TCP data transfer.");
+        }
+
+        // take ALPHA nodes which XOR distance it the smallest
+        let flatten = responsive_nodes.into_iter().flatten().collect();
+        Ok(flatten)
+    }
+    ///
     /// Receive ports for establishing TCP connection
     ///
-    async fn request_available_port_for_tcp_data_transfer(
+    async fn request_available_ports_for_tcp_data_transfer(
         &self,
         nodes: Vec<Response>,
         key: Key,
-    ) -> Result<Vec<Response>> {
-        let mut ports_responses: Vec<Response> = Vec::new();
-        for response in nodes {
-            if let Ok(response) = self
-                .send_store_port_request(response.sender, key.clone())
-                .await
-            {
-                if let (ResponseType::StorePortOK { port }) = response.response_type {
-                    ports_responses.push(response);
-                }
-            }
-        }
+    ) -> Vec<Option<Response>> {
+        let nodes_with_ports = nodes
+            .into_iter()
+            .map(|closest_node| self.send_store_port_request(closest_node.sender, key))
+            .collect::<Vec<_>>();
 
-        if ports_responses.len() == 0 {
-            bail!("No port returned from nodes.");
-        }
+        join_all(nodes_with_ports).await
+    }
 
-        Ok(ports_responses)
+    ///
+    ///
+    ///
+    async fn get_responsive_nodes_round(
+        &self,
+        nodes: Vec<NodeInfo>,
+        file_id: Key,
+    ) -> Vec<Option<Response>> {
+        let responsive_nodes = nodes
+            .into_iter()
+            .map(|closest_node| self.send_initial_store_request(closest_node, file_id))
+            .collect::<Vec<_>>();
+
+        // Run all lookups in parallel
+        join_all(responsive_nodes).await
     }
 
     ///
     /// Send initial STORE request to a node
     ///
-    async fn send_initial_store_request(&self, node_info: NodeInfo) -> Result<Response> {
-        let request = Request::new(RequestType::Store, self.to_node_info(), node_info);
+    async fn send_initial_store_request(
+        &self,
+        node_info: NodeInfo,
+        file_id: Key,
+    ) -> Option<Response> {
+        let request = Request::new(
+            RequestType::Store { file_id },
+            self.to_node_info(),
+            node_info,
+        );
 
         // Just call the send_request_and_wait method, it will return err if the request fails
-        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+        match self
+            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
             .await
+        {
+            Ok(response) if response.response_type == ResponseType::StoreOK => {
+                info!("Node '{}' is ready to accept data.", response.sender.id);
+                Some(response)
+            }
+            Ok(response) if response.response_type == ResponseType::StoreChunkUpdated => {
+                info!("Node '{}' updated the data.", response.sender.id);
+                None
+            }
+            _ => None,
+        }
     }
 
     ///
     /// Send STORE PORT request
     ///
-    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Result<Response> {
+    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Option<Response> {
         let request = Request::new(
             RequestType::StorePort { file_id: key },
             self.to_node_info(),
             node_info,
         );
 
-        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+        match self
+            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
             .await
+        {
+            Ok(response) => {
+                if let ResponseType::StorePortOK { port } = response.response_type {
+                    return Some(response);
+                };
+                None
+            }
+            _ => None,
+        }
     }
 
     ///
