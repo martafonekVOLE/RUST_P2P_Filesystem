@@ -61,8 +61,8 @@ impl ShardStorageManager {
                     bail!("Max number of shards exceeded");
                 }
                 let chunk_size = data.len();
-                println!("CHUNKSIZE: {}", chunk_size);
-                if chunk_size != CHUNK_SIZE_KB_SMALL && chunk_size != CHUNK_SIZE_KB_LARGE {
+
+                if chunk_size > CHUNK_SIZE_KB_LARGE * 1024 {
                     bail!("Invalid chunk size");
                 }
                 if MAX_DATA_STORED_MB * 1024 - self.total_stored_kb < chunk_size {

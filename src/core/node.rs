@@ -220,22 +220,20 @@ impl Node {
                         bail!("No port returned from nodes.");
                     }
 
-                    let mut successfully_sent_to: Vec<NodeInfo> = Vec::new();
-
                     // Step 6: send data to each node over TCP
-                    for response in ports {
-                        let status = self
-                            .establish_tcp_stream_and_send_data(
-                                response.clone(),
+                    let established_connection = ports
+                        .into_iter()
+                        .map(|node_with_port| {
+                            self.establish_tcp_stream_and_send_data(
+                                node_with_port.clone(),
                                 chunk.clone().data,
                             )
-                            .await;
-                        if let Ok(_) = status {
-                            successfully_sent_to.push(response.sender.clone())
-                        }
-                    }
+                        })
+                        .collect::<Vec<_>>();
 
-                    if successfully_sent_to.len() > 0 {
+                    let sent_to_nodes = join_all(established_connection).await;
+
+                    if sent_to_nodes.len() > 0 {
                         println!("Chunk successfully uploaded.");
                     } else {
                         // Future-improvement: Chunk may be sent again to different nodes.
