@@ -45,14 +45,19 @@ impl FileDownloader {
             return Err(ShardingError::ChunkHashMismatch);
         }
 
-        let decrypted_chunk = encryption::decrypt_payload(
+        let mut decrypted_chunk_data = encryption::decrypt_payload(
             &chunk.data,
             &self.file_metadata.encryption_key,
             &chunk_metadata.nonce,
         )
         .map_err(|_| ShardingError::DecryptionFailed)?;
 
-        self.file_writer.write_all(&decrypted_chunk).await?;
+        // Remove the padding if any
+        if decrypted_chunk_data.len() != chunk.decrypted_data_unpadded_size {
+            decrypted_chunk_data.truncate(chunk.decrypted_data_unpadded_size);
+        }
+
+        self.file_writer.write_all(&decrypted_chunk_data).await?;
         self.chunk_index += 1;
         if self.chunk_index >= self.file_metadata.chunks_metadata.len() {
             self.file_writer.flush().await?;

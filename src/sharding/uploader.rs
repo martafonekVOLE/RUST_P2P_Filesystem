@@ -39,7 +39,8 @@ impl FileUploader {
             return Err(ShardingError::FileTooBig);
         }
 
-        let chunk_size = Self::get_chunk_size_from_file_size(file_size);
+        //let chunk_size = Self::get_chunk_size_from_file_size(file_size);
+        let chunk_size = CHUNK_READ_KB_LARGE;
         let encryption_key = encryption::generate_key();
         let current_file_md = FileMetadata {
             name: full_file_path
@@ -64,13 +65,13 @@ impl FileUploader {
         FileUploader::new_with_max_file_size(full_file_path, MAX_FILE_SIZE_MB).await
     }
 
-    fn get_chunk_size_from_file_size(file_size: usize) -> usize {
-        if file_size < LARGE_FILE_THRESHOLD_MB * 1024 * 1024 {
-            CHUNK_READ_KB_SMALL * 1024
-        } else {
-            CHUNK_READ_KB_LARGE * 1024
-        }
-    }
+    // fn get_chunk_size_from_file_size(file_size: usize) -> usize {
+    //     if file_size < LARGE_FILE_THRESHOLD_MB * 1024 * 1024 {
+    //         CHUNK_READ_KB_SMALL * 1024
+    //     } else {
+    //         CHUNK_READ_KB_LARGE * 1024
+    //     }
+    // }
 
     pub async fn get_next_chunk(&mut self) -> Result<Option<Chunk>, ShardingError> {
         let file = &mut self.file_reader;
@@ -81,12 +82,23 @@ impl FileUploader {
         }
         buffer.truncate(bytes_read);
 
+        if bytes_read < self.chunk_size {
+            // Add padding with random bytes
+            let mut rng = rand::thread_rng();
+            let random_bytes: Vec<u8> = (0..self.chunk_size - bytes_read)
+                .map(|_| rng.random())
+                .collect();
+            buffer.extend(&random_bytes);
+        }
+        assert_eq!(buffer.len(), self.chunk_size);
+
         let (nonce, encrypted_chunk) = encryption::encrypt_payload(&buffer, &self.encryption_key)
             .map_err(|e| ShardingError::EncryptionFailed)?;
 
         let chunk = Chunk {
             data: encrypted_chunk.to_vec(),
             hash: Hash::from_input(&encrypted_chunk),
+            decrypted_data_unpadded_size: bytes_read, // Store real length in chunk
         };
 
         self.file_metadata.chunks_metadata.push(ChunkMetadata {
