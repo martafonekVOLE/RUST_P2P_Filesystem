@@ -213,7 +213,7 @@ impl Node {
 
                     // Step 5: get ports for TCP data transfer
                     let mut ports = self
-                        .get_ports_for_nodes(responsible_nodes, chunk.clone().hash)
+                        .get_ports_for_nodes(responsible_nodes, chunk.clone().hash, true)
                         .await?;
 
                     if ports.len() == 0 {
@@ -278,19 +278,25 @@ impl Node {
             dist_a.cmp(&dist_b)
         });
 
-        // take ALPHA nodes which XOR distance it the smallest
+        // take ALPHA nodes where XOR distance is the smallest
         let alpha_nodes = responsive_nodes.into_iter().flatten().take(ALPHA).collect();
 
         Ok(alpha_nodes)
     }
 
     ///
+    /// This method returns a vector of nodes, which responded with PORT. That means
+    /// that those are ready to accept a TCP data transfer.
     ///
-    ///
-    async fn get_ports_for_nodes(&self, nodes: Vec<Response>, key: Key) -> Result<Vec<Response>> {
+    async fn get_ports_for_nodes(
+        &self,
+        nodes: Vec<Response>,
+        key: Key,
+        is_store: bool,
+    ) -> Result<Vec<Response>> {
         // Responsive nodes which did respond to initial request with StoreOK
         let mut responsive_nodes = self
-            .request_available_ports_for_tcp_data_transfer(nodes, key)
+            .request_available_ports_for_tcp_data_transfer(nodes, key, is_store)
             .await;
 
         if responsive_nodes.len() == 0 {
@@ -301,17 +307,19 @@ impl Node {
         let flatten = responsive_nodes.into_iter().flatten().collect();
         Ok(flatten)
     }
+
     ///
-    /// Receive ports for establishing TCP connection
+    /// Receive ports for TCP connection
     ///
     async fn request_available_ports_for_tcp_data_transfer(
         &self,
         nodes: Vec<Response>,
         key: Key,
+        is_store: bool,
     ) -> Vec<Option<Response>> {
         let nodes_with_ports = nodes
             .into_iter()
-            .map(|closest_node| self.send_store_port_request(closest_node.sender, key))
+            .map(|closest_node| self.send_store_port_request(closest_node.sender, key, is_store))
             .collect::<Vec<_>>();
 
         join_all(nodes_with_ports).await
@@ -368,9 +376,17 @@ impl Node {
     ///
     /// Send STORE PORT request
     ///
-    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Option<Response> {
+    async fn send_store_port_request(
+        &self,
+        node_info: NodeInfo,
+        key: Key,
+        is_store: bool,
+    ) -> Option<Response> {
         let request = Request::new(
-            RequestType::StorePort { file_id: key },
+            RequestType::GetPort {
+                file_id: key,
+                is_store,
+            },
             self.to_node_info(),
             node_info,
         );
@@ -380,7 +396,7 @@ impl Node {
             .await
         {
             Ok(response) => {
-                if let ResponseType::StorePortOK { port } = response.response_type {
+                if let ResponseType::PortOK { port } = response.response_type {
                     return Some(response);
                 };
                 None
@@ -397,7 +413,7 @@ impl Node {
         response: Response,
         data: Vec<u8>,
     ) -> Result<()> {
-        if let (ResponseType::StorePortOK { port }) = response.response_type {
+        if let (ResponseType::PortOK { port }) = response.response_type {
             let address =
                 response.sender.address.ip().to_string() + ":" + port.to_string().as_str();
             let mut stream = TcpStream::connect(address)

@@ -4,7 +4,9 @@ use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
 use crate::routing::routing_table::RoutingTable;
 use crate::storage::shard_storage_manager::ShardStorageManager;
+use futures::future::err;
 use futures::FutureExt;
+use log::__private_api::loc;
 use log::{error, info, warn};
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +14,8 @@ use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use tokio::time::timeout;
+
+const LOCALHOST: &str = "127.0.0.1:0";
 
 ///
 /// Handles incoming requests.
@@ -60,13 +64,14 @@ pub async fn handle_received_request(
             )
             .await;
         }
-        RequestType::StorePort { file_id } => {
-            handle_store_port_message(
+        RequestType::GetPort { file_id, is_store } => {
+            handle_get_port_message(
                 this_node_info,
                 request,
                 message_dispatcher,
                 shard_storage_manager,
                 file_id, // TODO: rename to chunk_hash?
+                is_store,
             )
             .await;
         }
@@ -175,15 +180,16 @@ async fn handle_store_message(
     }
 }
 
-async fn handle_store_port_message(
+async fn handle_get_port_message(
     this_node_info: NodeInfo,
     request: Request,
     message_dispatcher: Arc<MessageDispatcher>,
     shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
     file_id: Key,
+    is_upload: bool,
 ) {
-    // TODO: maybe use LOCALHOST macro from std instead?
-    let tcp_listener = match TcpListener::bind("127.0.0.1:0").await {
+    // Open TCP Listener for data transfer
+    let tcp_listener = match TcpListener::bind(LOCALHOST).await {
         Ok(listener) => listener,
         Err(e) => {
             error!("Error opening TCP Listener.");
@@ -191,57 +197,29 @@ async fn handle_store_port_message(
         }
     };
 
-    let socket_address = match tcp_listener.local_addr() {
+    // Get available port
+    let port = match tcp_listener.local_addr() {
         Ok(addr) => addr,
         Err(e) => {
             error!("Error reading Socket Address.");
             return;
         }
-    };
-
-    let port = socket_address.port();
+    }
+    .port();
 
     // Store node into active TCP connections
-    let insert = shard_storage_manager
+    if let Some(insert) = shard_storage_manager
         .write()
         .await
-        .add_active_tcp_connection(port, request.sender.clone(), file_id.clone());
-
-    if insert.is_some() {
-        loop {
-            let tcp_listener = match TcpListener::bind("127.0.0.1:0").await {
-                Ok(listener) => listener,
-                Err(e) => {
-                    error!("Error opening TCP Listener.");
-                    return;
-                }
-            };
-
-            let socket_address = match tcp_listener.local_addr() {
-                Ok(addr) => addr,
-                Err(e) => {
-                    error!("Error reading Socket Address.");
-                    return;
-                }
-            };
-
-            let port = socket_address.port();
-
-            // Store node into active TCP connections
-            let insert = shard_storage_manager
-                .write()
-                .await
-                .add_active_tcp_connection(port, request.sender.clone(), file_id.clone());
-
-            if insert.is_none() {
-                break;
-            }
-        }
+        .add_active_tcp_connection(port, request.sender.clone(), file_id.clone())
+    {
+        error!("Unable to store a connection.");
+        return;
     }
 
-    // Respond with a STORE_OK message.
+    // Respond with a PORT_OK message.
     let response = Response::new(
-        ResponseType::StorePortOK { port },
+        ResponseType::PortOK { port },
         this_node_info,         // Sender field
         request.sender.clone(), // Receiver field
         request.request_id,
@@ -255,18 +233,20 @@ async fn handle_store_port_message(
     // Wait for TCP stream
     tokio::spawn(async move {
         match timeout(Duration::from_secs(10), tcp_listener.accept()).await {
-            Ok(Ok((mut stream, addr))) => {
+            Ok(Ok((mut stream, _addr))) => {
+                info!("Established TCP connection.");
+
                 let mut data = Vec::new();
                 let received_bytes = stream.read_to_end(&mut data).await;
 
                 match received_bytes {
                     Ok(_) => {
-                        shard_storage_manager
-                            .write()
-                            .await
-                            .store_chunk_for_known_peer(data, port)
-                            .await
-                            .expect("Failed to save shard to storage");
+                        info!("Successfully received the data over TCP.");
+
+                        match is_upload {
+                            true => handle_tcp_upload(data, port, &shard_storage_manager).await,
+                            false => handle_tcp_download().await,
+                        };
                     }
                     Err(_) => {
                         error!("An error has occurred while reading the TCP Stream.");
@@ -274,7 +254,7 @@ async fn handle_store_port_message(
                     }
                 }
             }
-            Ok(Err(err)) => {
+            Ok(Err(_err)) => {
                 error!("Failure while accepting data.");
                 return;
             }
@@ -284,6 +264,28 @@ async fn handle_store_port_message(
             }
         }
     });
+}
+
+async fn handle_tcp_download() {
+    todo!()
+}
+
+///
+///
+///
+async fn handle_tcp_upload(
+    data: Vec<u8>,
+    port: u16,
+    shard_storage_manager: &Arc<RwLock<ShardStorageManager>>,
+) {
+    shard_storage_manager
+        .write()
+        .await
+        .store_chunk_for_known_peer(data, port)
+        .await
+        .expect("Failed to save shard to storage");
+
+    info!("Successfully stored the received data.");
 }
 
 ///
