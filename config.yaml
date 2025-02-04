@@ -1,6 +1,6 @@
 # beacon variables can be omitted if running with --skip-join flag
 beacon_node_address: "127.0.0.1:8081"
-beacon_node_key: 913ed1e1f69380205ccfdabf692f96dfb52204da # Must be K bytes, (K*2 hex characters)
+beacon_node_key: eb9082900bc395fb0a626143c11011054a531ca7 # Must be K bytes, (K*2 hex characters)
 # explicit node port can be omitted, in that case an ephemeral port will be used
 node_port: 8081
 cache_file_path: "cache.json"

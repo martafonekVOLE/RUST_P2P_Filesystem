@@ -4,6 +4,7 @@ use clap::builder::TypedValueParser;
 use clap::Parser;
 use cli::args::Arguments;
 use log::{error, info, warn, LevelFilter};
+use p2p::cache::Cache;
 use p2p::config::Config;
 use p2p::constants::K;
 use p2p::core::key::Key;
@@ -27,9 +28,24 @@ async fn main() {
     // For debug purposes
     init_logging(LevelFilter::Debug);
 
-    // Read and parse the configuration file
-    let config = Config::parse_from_file(&args.config, args.skip_join, args.port)
-        .expect("Failed to read configuration file");
+    // Read and parse the configuration & cache file
+    let mut cache = if let Some(cache_path) = args.cache {
+        // Validate the cache file path.
+        Config::validate_cache_file_path(&cache_path);
+        // Load the cache from the cache file.
+        Cache::parse_from_file(&cache_path).expect("Failed to read cache file")
+    } else if let Some(config_path) = args.config {
+        // Load the configuration directly from the config file.
+        let config = Config::parse_from_file(&config_path, args.skip_join, args.port)
+            .expect("Failed to read configuration file");
+        // Construct a Cache object from the loaded configuration.
+        Cache { key: None, config }
+    } else {
+        unreachable!("Either --cache or --config must be provided");
+    };
+
+    let config = cache.config.clone();
+
     // Get this node's IP
     let ip = config
         .resolve_ip_address()
@@ -41,8 +57,16 @@ async fn main() {
         .node_port
         .expect("Configuration error: node_port is missing or invalid.");
 
+    let key = match &cache.key {
+        Some(existing_key) => existing_key.clone(),
+        None => {
+            let new_key = Key::new_random();
+            cache.key = Some(new_key.clone());
+            new_key
+        }
+    };
     // Create node
-    let mut node = Node::new(Key::new_random(), ip.to_string(), port, config.storage_path).await;
+    let mut node = Node::new(key, ip.to_string(), port, config.storage_path).await;
 
     // Begin listening for incoming network traffic
     node.start_listening();
@@ -70,6 +94,10 @@ async fn main() {
                 return;
             }
         }
+    }
+
+    if let Some(file_path) = config.cache_file_path.as_deref() {
+        cache.save_to_file(file_path);
     }
 
     println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");
