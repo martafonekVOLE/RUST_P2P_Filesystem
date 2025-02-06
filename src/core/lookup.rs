@@ -1,6 +1,14 @@
 use crate::constants::{ALPHA, K};
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub enum LookupRoundStatus {
+    Fail,
+    ImprovedNodes,
+    FoundValue,
+}
 
 #[derive(Debug)]
 pub struct LookupNodeInfo {
@@ -37,18 +45,36 @@ impl PartialEq for LookupNodeInfo {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub enum LookupSuccessType {
+    Value,
+    Nodes,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct LookupResponse {
     resolver: NodeInfo,
     success: bool,
+    success_type: Option<LookupSuccessType>,
     k_closest: Vec<NodeInfo>,
 }
 
 impl LookupResponse {
-    pub fn new_successful(resolver: NodeInfo, k_closest: Vec<NodeInfo>) -> Self {
+    pub fn new_nodes_successful(resolver: NodeInfo, k_closest: Vec<NodeInfo>) -> Self {
         LookupResponse {
             resolver,
             success: true,
+            success_type: Some(LookupSuccessType::Nodes),
             k_closest,
+        }
+    }
+
+    pub fn new_value_successful(resolver: NodeInfo) -> Self {
+        LookupResponse {
+            resolver,
+            success: true,
+            success_type: Some(LookupSuccessType::Value),
+            k_closest: Vec::new(),
         }
     }
 
@@ -56,6 +82,7 @@ impl LookupResponse {
         LookupResponse {
             resolver,
             success: false,
+            success_type: None,
             k_closest: Vec::new(),
         }
     }
@@ -70,6 +97,10 @@ impl LookupResponse {
 
     pub fn was_successful(&self) -> bool {
         self.success
+    }
+
+    pub fn get_success_type(&self) -> Option<LookupSuccessType> {
+        self.success_type.clone()
     }
 }
 
@@ -111,12 +142,24 @@ impl LookupBuffer {
         });
     }
 
-    pub(crate) fn record_lookup_round_responses(&mut self, responses: Vec<LookupResponse>) -> bool {
+    pub(crate) fn record_lookup_round_responses(
+        &mut self,
+        responses: Vec<LookupResponse>,
+        for_value: bool,
+    ) -> bool {
         let previous_k_closest = self.get_resulting_vector();
 
         for response in responses {
-            // If the response was a failure, mark the resolver node as responded
-            if !response.success {
+            // If value is being looked up, this will return true
+            if for_value && matches!(response.success_type, Some(LookupSuccessType::Value)) {
+                return true;
+            }
+
+            // If the response was a failure or a different type of success,
+            // mark the resolver node as responded
+            if !response.success
+                || (!for_value && matches!(response.success_type, Some(LookupSuccessType::Value)))
+            {
                 self.mark_node_as_queried(response.resolver.id);
                 continue;
             }
@@ -251,7 +294,7 @@ mod tests {
     fn test_lookup_response_successful() {
         let resolver = make_node_info("resolver", 7000);
         let neighbors = vec![make_node_info("n1", 7001), make_node_info("n2", 7002)];
-        let resp = LookupResponse::new_successful(resolver.clone(), neighbors.clone());
+        let resp = LookupResponse::new_nodes_successful(resolver.clone(), neighbors.clone());
         assert!(resp.was_successful());
         assert_eq!(resp.get_resolver(), resolver);
         assert_eq!(resp.get_k_closest(), neighbors);
@@ -309,12 +352,12 @@ mod tests {
         );
         let old_vec = buffer.get_resulting_vector();
 
-        let resp_success = LookupResponse::new_successful(
+        let resp_success = LookupResponse::new_nodes_successful(
             make_node_info("r1", 9001),
             vec![make_node_info("new_1", 9003), make_node_info("new_2", 9004)],
         );
         let resp_fail = LookupResponse::new_failed(make_node_info("r2", 9002));
-        let changed = buffer.record_lookup_round_responses(vec![resp_success, resp_fail]);
+        let changed = buffer.record_lookup_round_responses(vec![resp_success, resp_fail], false);
         assert!(changed);
 
         let new_vec = buffer.get_resulting_vector();
@@ -383,10 +426,10 @@ mod tests {
         let mut buffer = LookupBuffer::new(target, vec![resolver.clone()], this_node.clone());
 
         // Result containing this_node
-        let lr = LookupResponse::new_successful(resolver, vec![this_node.clone()]);
+        let lr = LookupResponse::new_nodes_successful(resolver, vec![this_node.clone()]);
 
         // Record the response
-        buffer.record_lookup_round_responses(vec![lr]);
+        buffer.record_lookup_round_responses(vec![lr], false);
 
         // Check that this_node is not in the resulting vector
         let resulting_nodes = buffer.get_resulting_vector();

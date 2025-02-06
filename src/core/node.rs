@@ -2,7 +2,7 @@ use crate::constants::PING_TIMEOUT_MILLISECONDS;
 use crate::constants::{ALPHA, LOOKUP_TIMEOUT_MILLISECONDS};
 use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
-use crate::core::lookup::{LookupBuffer, LookupResponse};
+use crate::core::lookup::{LookupBuffer, LookupResponse, LookupSuccessType};
 use crate::networking::message_dispatcher::MessageDispatcher;
 use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
@@ -13,7 +13,7 @@ use crate::sharding::uploader::FileUploader;
 use crate::storage::file_manager::FileManager;
 use crate::storage::shard_storage_manager::ShardStorageManager;
 use futures::future::{join_all, ready};
-use log::info;
+use log::{error, info};
 use std::cmp::PartialEq;
 use std::fs;
 use std::net::SocketAddr;
@@ -21,15 +21,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpStream, UdpSocket as TokioUdpSocket};
+use tokio::net::{TcpListener, TcpStream, UdpSocket as TokioUdpSocket};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
 
 use anyhow::{anyhow, bail, Result};
 
+use crate::networking::tcp_listener::TcpListenerService;
 use futures::FutureExt;
 use std::error::Error;
+
+const LOCALHOST: &str = "127.0.0.1:0";
 
 pub struct Node {
     pub key: Key,
@@ -162,19 +165,19 @@ impl Node {
             }
 
             // Get the responses from all resolvers in this round
-            let current_responses = self.lookup_round(target, resolvers).await;
+            let current_responses = self.lookup_round(target, resolvers, false).await;
 
             // Record responses. If we didn't get any closer results, quit the rounds loop
-            if !lookup_buffer.record_lookup_round_responses(current_responses) {
+            if !lookup_buffer.record_lookup_round_responses(current_responses, false) {
                 break;
             }
         }
 
         // Execute the last lookup on all the resulting nodes that haven't been queried yet
         let last_lookup_responses = self
-            .lookup_round(target, lookup_buffer.get_unqueried_resulting_nodes())
+            .lookup_round(target, lookup_buffer.get_unqueried_resulting_nodes(), false)
             .await;
-        lookup_buffer.record_lookup_round_responses(last_lookup_responses);
+        lookup_buffer.record_lookup_round_responses(last_lookup_responses, false);
 
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
@@ -255,7 +258,10 @@ impl Node {
     ///
     /// Get ALPHA most responsive closest nodes for provided chunk.
     ///
-    async fn get_closest_nodes_responsible_for_chunk(&self, chunk_id: Key) -> Result<Vec<Response>> {
+    async fn get_closest_nodes_responsible_for_chunk(
+        &self,
+        chunk_id: Key,
+    ) -> Result<Vec<Response>> {
         let closest_nodes = self
             .find_node(chunk_id.clone())
             .await
@@ -296,7 +302,7 @@ impl Node {
     ) -> Result<Vec<Response>> {
         // Responsive nodes which did respond to initial request with StoreOK
         let mut responsive_nodes = self
-            .request_available_ports_for_tcp_data_transfer(nodes, key, is_store)
+            .request_available_ports_for_tcp_data_transfer(nodes, key)
             .await;
 
         if responsive_nodes.len() == 0 {
@@ -315,11 +321,10 @@ impl Node {
         &self,
         nodes: Vec<Response>,
         key: Key,
-        is_store: bool,
     ) -> Vec<Option<Response>> {
         let nodes_with_ports = nodes
             .into_iter()
-            .map(|closest_node| self.send_store_port_request(closest_node.sender, key, is_store))
+            .map(|closest_node| self.send_store_port_request(closest_node.sender, key))
             .collect::<Vec<_>>();
 
         join_all(nodes_with_ports).await
@@ -376,17 +381,9 @@ impl Node {
     ///
     /// Send STORE PORT request
     ///
-    async fn send_store_port_request(
-        &self,
-        node_info: NodeInfo,
-        key: Key,
-        is_store: bool,
-    ) -> Option<Response> {
+    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Option<Response> {
         let request = Request::new(
-            RequestType::GetPort {
-                file_id: key,
-                is_store,
-            },
+            RequestType::GetPort { file_id: key },
             self.to_node_info(),
             node_info,
         );
@@ -452,7 +449,7 @@ impl Node {
 
         // Send single find_node to the beacon to get the initial k-closest nodes
         let mut initial_k_closest = self
-            .single_lookup(self.key, beacon_node.clone())
+            .single_lookup(self.key, beacon_node.clone(), false)
             .await
             .get_k_closest();
 
@@ -477,19 +474,23 @@ impl Node {
             }
 
             // Get the responses from all resolvers in this round
-            let current_responses = self.lookup_round(self.key, resolvers).await;
+            let current_responses = self.lookup_round(self.key, resolvers, false).await;
 
             // Record responses. If we didn't get any closer results, quit the rounds loop
-            if !lookup_buffer.record_lookup_round_responses(current_responses) {
+            if !lookup_buffer.record_lookup_round_responses(current_responses, false) {
                 break;
             }
         }
 
         // Execute the last lookup on all the resulting nodes that haven't been queried yet
         let last_lookup_responses = self
-            .lookup_round(self.key, lookup_buffer.get_unqueried_resulting_nodes())
+            .lookup_round(
+                self.key,
+                lookup_buffer.get_unqueried_resulting_nodes(),
+                false,
+            )
             .await;
-        lookup_buffer.record_lookup_round_responses(last_lookup_responses);
+        lookup_buffer.record_lookup_round_responses(last_lookup_responses, false);
 
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
@@ -506,9 +507,19 @@ impl Node {
     /// Perform a single lookup to the given resolver node.
     /// This can be called individually, or used by lookup_round for parallel calls.
     ///
-    pub async fn single_lookup(&self, target: Key, resolver_node_info: NodeInfo) -> LookupResponse {
+    pub async fn single_lookup(
+        &self,
+        target: Key,
+        resolver_node_info: NodeInfo,
+        for_value: bool,
+    ) -> LookupResponse {
+        let request_type = match for_value {
+            true => RequestType::FindValue { chunk_id: target },
+            false => RequestType::FindNode { node_id: target },
+        };
+
         let request = Request::new(
-            RequestType::FindNode { node_id: target },
+            request_type.clone(),
             self.to_node_info(),
             resolver_node_info.clone(),
         );
@@ -520,11 +531,18 @@ impl Node {
         {
             // We received a response
             Ok(response) => {
-                // If the response is a Nodes response, return a successful LookupResponse
                 if let ResponseType::Nodes { nodes } = response.response_type {
-                    LookupResponse::new_successful(resolver_node_info, nodes)
+                    LookupResponse::new_nodes_successful(resolver_node_info, nodes)
+                }
+                // Decide if the response is valid based on the context
+                else if let ResponseType::HasValue { chunk_id } = response.response_type {
+                    return match for_value {
+                        true => LookupResponse::new_value_successful(resolver_node_info),
+                        false => LookupResponse::new_failed(resolver_node_info),
+                    };
+                }
                 // Any other ResponseType is considered a failure
-                } else {
+                else {
                     LookupResponse::new_failed(resolver_node_info)
                 }
             }
@@ -540,7 +558,12 @@ impl Node {
     /// - If resolvers is empty, returns an empty Vec.
     /// - Otherwise, spawns tasks for each resolver using `single_lookup`.
     ///
-    pub async fn lookup_round(&self, target: Key, resolvers: Vec<NodeInfo>) -> Vec<LookupResponse> {
+    pub async fn lookup_round(
+        &self,
+        target: Key,
+        resolvers: Vec<NodeInfo>,
+        for_value: bool,
+    ) -> Vec<LookupResponse> {
         if resolvers.is_empty() {
             return Vec::new();
         }
@@ -550,7 +573,7 @@ impl Node {
             .into_iter()
             .map(|resolver_node_info| {
                 let t_clone = target.clone();
-                self.single_lookup(t_clone, resolver_node_info)
+                self.single_lookup(t_clone, resolver_node_info, for_value)
             })
             .collect::<Vec<_>>();
 
@@ -616,42 +639,147 @@ impl Node {
             }
         });
     }
-    pub fn find_value(&self, file_id: Key) {
-        let chunk_keys: Vec<Key> = Vec::new();
 
+    ///
+    ///
+    ///
+    pub async fn find_value(&self, target: Key) -> Result<()> {
+        // Do metadata magic which does retrieve chunks
+        let chunks: Vec<Key> = Vec::new();
 
+        let possible_data = self.get_chunks_values(chunks).await;
+
+        // Check if all data were received completely
+
+        // Assemble file
+
+        Ok(())
     }
 
-    async fn get_chunk_value (&self, chunk_id: Key) -> Result<()> {
-        let responsible_nodes = self
-            .get_closest_nodes_responsible_for_chunk(chunk_id.clone())
-            .await?;
+    ///
+    ///
+    ///
+    pub async fn get_chunks_values(&self, chunks: Vec<Key>) -> Vec<Result<Vec<u8>>> {
+        let tasks = chunks
+            .into_iter()
+            .map(|chunk_key| {
+                // Do magic with the chunk (decrypt)
 
-        let mut ports = self
-            .provide_ports_for_nodes(responsible_nodes, chunk_id.clone())
-            .await?;
+                self.get_value(chunk_key)
+            })
+            .collect::<Vec<_>>();
 
-
+        // Run all lookups in parallel
+        join_all(tasks).await
     }
 
+    ///
+    ///
+    ///
+    pub async fn get_value(&self, target: Key) -> Result<Vec<u8>> {
+        // FIRST STEP: Try to find value locally
 
-    async fn provide_ports_for_nodes(&self, nodes: Vec<Response>, key: Key) -> Result<Vec<Response>> {
-        // Responsive nodes which did respond to initial request with StoreOK
-        let mut responsive_nodes = self
-            .request_available_ports_for_tcp_data_transfer(nodes, key)
-            .await;
-
-        if responsive_nodes.len() == 0 {
-            bail!("Unable to store file. No nodes are ready to accept TCP data transfer.");
+        // Initial resolvers are the alpha closest nodes to the target in our RT
+        let initial_resolvers = self.routing_table.read().await.get_alpha_closest(&target)?;
+        if initial_resolvers.is_empty() {
+            bail!("No initial resolvers available for find_value resolutions");
         }
 
-        // take ALPHA nodes which XOR distance it the smallest
-        let flatten = responsive_nodes.into_iter().flatten().collect();
-        Ok(flatten)
+        // Inject the initial resolvers into the result buffer
+        let mut lookup_buffer =
+            LookupBuffer::new(target.clone(), initial_resolvers, self.to_node_info());
+
+        let mut current_responses = Vec::new();
+
+        loop {
+            // Get the resolvers for this
+            let resolvers = lookup_buffer.get_alpha_unqueried_nodes();
+            if resolvers.is_empty() {
+                break;
+            }
+
+            // Get the responses from all resolvers in this round
+            current_responses = self.lookup_round(target, resolvers, false).await;
+
+            // Record responses. If we didn't get any closer results, quit the rounds loop
+            if !lookup_buffer.record_lookup_round_responses(current_responses.clone(), true) {
+                break;
+            }
+        }
+
+        if let Some(lookup_response) = self.has_response_with_value(current_responses) {
+            let key_owner = lookup_response.get_resolver();
+            let data = self.get_chunk_data_from_node(target, key_owner).await?;
+            return Ok(data);
+        }
+
+        Err("Unable to receive data").expect("Unable to receive data")
+    }
+
+    ///
+    ///
+    ///
+    fn has_response_with_value(&self, responses: Vec<LookupResponse>) -> Option<LookupResponse> {
+        for response in responses {
+            if let Some(success_type) = response.get_success_type() {
+                match success_type {
+                    LookupSuccessType::Value => {
+                        return Some(response);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        None
+    }
+
+    ///
+    ///
+    ///
+    async fn get_chunk_data_from_node(
+        &self,
+        chunk_id: Key,
+        chunk_owner: NodeInfo,
+    ) -> Result<Vec<u8>> {
+        // Open a TCP Listener
+        let tcp_listener_service = match TcpListenerService::new().await {
+            Ok(listener) => listener,
+            Err(E) => bail!(E),
+        };
+
+        // Send download request
+        self.send_chunk_download_request(chunk_owner, chunk_id, tcp_listener_service.get_port())
+            .await?;
+
+        // Receive data over TCP
+        let data = tcp_listener_service.receive_data().await?;
+
+        Ok(data)
+    }
+
+    ///
+    ///
+    ///
+    async fn send_chunk_download_request(
+        &self,
+        receiver: NodeInfo,
+        chunk_id: Key,
+        port: u16,
+    ) -> Result<()> {
+        let request = Request::new(
+            RequestType::GetValue { chunk_id, port },
+            self.to_node_info(),
+            receiver,
+        );
+
+        if let Err(_send_err) = self.message_dispatcher.send_request(request).await {
+            bail!("Unable to send request via dispatcher.");
+        }
+
+        Ok(())
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

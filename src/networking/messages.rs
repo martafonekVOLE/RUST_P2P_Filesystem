@@ -10,12 +10,14 @@ use uuid::Uuid;
 
 pub type RequestId = Uuid; // TODO make a custom strut, abstract away implementation?
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum RequestType {
     Ping,
     FindNode { node_id: Key },
+    FindValue { chunk_id: Key },
     Store { file_id: Key },
-    GetPort { file_id: Key, is_store: bool },
+    GetPort { file_id: Key },
+    GetValue { chunk_id: Key, port: u16 },
 }
 
 impl Display for RequestType {
@@ -23,8 +25,12 @@ impl Display for RequestType {
         match self {
             RequestType::Ping => write!(f, "Ping"),
             RequestType::FindNode { node_id } => write!(f, "FindNode({})", node_id),
+            RequestType::FindValue { chunk_id } => write!(f, "FindValue({})", chunk_id),
             RequestType::Store { file_id } => write!(f, "Store({})", file_id),
-            RequestType::GetPort { file_id, is_store } => write!(f, "GetPort({})", file_id),
+            RequestType::GetPort { file_id } => write!(f, "GetPort({})", file_id),
+            RequestType::GetValue { chunk_id, port } => {
+                write!(f, "GetValue({}, {})", chunk_id, port)
+            }
         }
     }
 }
@@ -36,6 +42,7 @@ pub enum ResponseType {
     StoreChunkUpdated,
     StoreOK,
     PortOK { port: u16 },
+    HasValue { chunk_id: Key },
 }
 
 impl Display for ResponseType {
@@ -48,6 +55,7 @@ impl Display for ResponseType {
             ResponseType::StoreChunkUpdated => write!(f, "StoreChunkUpdated"),
             ResponseType::StoreOK => write!(f, "StoreOK"),
             ResponseType::PortOK { port } => write!(f, "PortOK({})", port.to_string()),
+            ResponseType::HasValue { chunk_id } => write!(f, "HasValue({})", chunk_id),
         }
     }
 }
