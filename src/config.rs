@@ -63,9 +63,6 @@ impl Config {
 
         // Validate paths
         config.validate_storage_path(&config.storage_path)?;
-        if let Some(cache_file_path) = &config.cache_file_path {
-            Self::validate_cache_file_path(cache_file_path)?;
-        }
 
         // If skip_join is false, these must be present:
         if !skip_join {
@@ -97,19 +94,6 @@ impl Config {
             return Err(format!("Storage path is not a directory: {}", path.display()).into());
         }
         Ok(())
-    }
-
-    pub fn validate_cache_file_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let path = std::path::Path::new(path);
-        if path.exists() {
-            if path.is_file() {
-                Ok(())
-            } else {
-                Err(format!("Cache path is not a file: {}", path.display()).into())
-            }
-        } else {
-            Err(format!("Cache file does not exist: {}", path.display()).into())
-        }
     }
 
     pub async fn resolve_ip_address(&self) -> Result<IpAddr, Box<dyn std::error::Error>> {

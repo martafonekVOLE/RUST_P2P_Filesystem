@@ -12,7 +12,10 @@ use p2p::core::node::Node;
 use p2p::networking::node_info::NodeInfo;
 use p2p::utils::logging::init_logging;
 use public_ip;
+use tokio::time::sleep;
 use std::io::BufRead;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
@@ -30,8 +33,6 @@ async fn main() {
 
     // Read and parse the configuration & cache file
     let mut cache = if let Some(cache_path) = args.cache {
-        // Validate the cache file path.
-        Config::validate_cache_file_path(&cache_path);
         // Load the cache from the cache file.
         Cache::parse_from_file(&cache_path).expect("Failed to read cache file")
     } else if let Some(config_path) = args.config {
@@ -39,7 +40,7 @@ async fn main() {
         let config = Config::parse_from_file(&config_path, args.skip_join, args.port)
             .expect("Failed to read configuration file");
         // Construct a Cache object from the loaded configuration.
-        Cache { key: None, config }
+        Cache { key: Key::new_random(), routing_table_nodes: None, skip_join: args.skip_join, config }
     } else {
         unreachable!("Either --cache or --config must be provided");
     };
@@ -57,16 +58,16 @@ async fn main() {
         .node_port
         .expect("Configuration error: node_port is missing or invalid.");
 
-    let key = match &cache.key {
-        Some(existing_key) => existing_key.clone(),
-        None => {
-            let new_key = Key::new_random();
-            cache.key = Some(new_key.clone());
-            new_key
-        }
-    };
     // Create node
-    let mut node = Node::new(key, ip.to_string(), port, config.storage_path).await;
+    let mut node = Node::new(cache.key, ip.to_string(), port, config.storage_path).await;
+
+    if let Some(routing_nodes) = &cache.routing_table_nodes {
+        let mut rt = node.routing_table.write().await;
+        for node_info in routing_nodes {
+            let _ = rt.store_nodeinfo(node_info.clone());
+        }
+        info!("Loaded {} nodes into the routing table from cache.", routing_nodes.len());
+    }
 
     // Begin listening for incoming network traffic
     node.start_listening();
@@ -74,7 +75,7 @@ async fn main() {
     // Log the node port
     info!("Your node {} is listening at {}", node.key, node.address);
 
-    if args.skip_join {
+    if cache.skip_join {
         warn!("Skipping network join! Only set --skip-join for the first node in a new network.");
     } else {
         // Create the beacon node's info
@@ -96,8 +97,38 @@ async fn main() {
         }
     }
 
-    if let Some(file_path) = config.cache_file_path.as_deref() {
-        cache.save_to_file(file_path);
+    let cache_ref = Arc::new(Mutex::new(cache));
+    let node_ref = Arc::new(node.clone());
+    
+    // Create cache file
+    if let Some(file_path) = config.cache_file_path.clone() {
+        let node_for_saver = Arc::clone(&node_ref);
+        let cache_for_saver = Arc::clone(&cache_ref);
+
+        tokio::spawn(async move {
+            let interval = Duration::from_secs(5);
+            loop {
+                // Fetch routing table from the node
+                let all_contacts = node_for_saver.get_routing_table_content().await;
+
+                // Lock the cache, update, then save
+                {
+                    // Lock the cache and unwrap the guard
+                    let mut locked_cache = cache_for_saver.lock().unwrap();
+                    
+                    // Now you can access the fields inside `Cache`
+                    locked_cache.routing_table_nodes = Some(all_contacts);
+                
+                    // And call any methods as well
+                    if let Err(e) = locked_cache.save_to_file(&file_path) {
+                        eprintln!("Failed to save cache file: {}", e);
+                    }
+                }
+
+                // Sleep for 5 seconds
+                sleep(interval).await;
+            }
+        });
     }
 
     println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");

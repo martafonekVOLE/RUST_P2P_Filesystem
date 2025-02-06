@@ -1,13 +1,15 @@
-use std::fs::File;
+use std::{fs::{create_dir_all, File}, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{config::Config, core::key::Key};
+use crate::{config::Config, core::key::Key, networking::node_info::NodeInfo};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Cache {
-    pub key: Option<Key>,
+    pub key: Key,
+    pub skip_join: bool,
     pub config: Config,
+    pub routing_table_nodes: Option<Vec<NodeInfo>>,
 }
 
 impl Cache {
@@ -20,23 +22,14 @@ impl Cache {
     }
 
     pub fn save_to_file(&self, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let file = File::create(file_path)?;
-
-        serde_json::to_writer_pretty(file, self)?;
-
-        Ok(())
-    }
-
-    pub fn validate_cache_file_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let path = std::path::Path::new(path);
-        if path.exists() {
-            if path.is_file() {
-                Ok(())
-            } else {
-                Err(format!("Cache path is not a file: {}", path.display()).into())
+        if let Some(parent) = Path::new(file_path).parent() {
+            if !parent.exists() {
+                create_dir_all(parent)?;
             }
-        } else {
-            Err(format!("Cache file does not exist: {}", path.display()).into())
         }
+        
+        let file = File::create(file_path)?;
+        serde_json::to_writer_pretty(file, self)?;
+        Ok(())
     }
 }
