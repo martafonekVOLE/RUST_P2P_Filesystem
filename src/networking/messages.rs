@@ -15,7 +15,7 @@ pub enum RequestType {
     Ping,
     FindNode { node_id: Key },
     Store { file_id: Key },
-    StorePort { file_id: Key },
+    GetPort { file_id: Key, is_store: bool },
 }
 
 impl Display for RequestType {
@@ -24,7 +24,7 @@ impl Display for RequestType {
             RequestType::Ping => write!(f, "Ping"),
             RequestType::FindNode { node_id } => write!(f, "FindNode({})", node_id),
             RequestType::Store { file_id } => write!(f, "Store({})", file_id),
-            RequestType::StorePort { file_id } => write!(f, "StorePort({})", file_id),
+            RequestType::GetPort { file_id, is_store } => write!(f, "GetPort({})", file_id),
         }
     }
 }
@@ -33,10 +33,9 @@ impl Display for RequestType {
 pub enum ResponseType {
     Pong,
     Nodes { nodes: Vec<NodeInfo> },
-    // TODO: Add option to responsd that Chunk is already stored and no need to trasnfer the chunk again.
     StoreChunkUpdated,
     StoreOK,
-    StorePortOK { port: u16 },
+    PortOK { port: u16 },
 }
 
 impl Display for ResponseType {
@@ -48,7 +47,7 @@ impl Display for ResponseType {
             }
             ResponseType::StoreChunkUpdated => write!(f, "StoreChunkUpdated"),
             ResponseType::StoreOK => write!(f, "StoreOK"),
-            ResponseType::StorePortOK { port } => write!(f, "StorePortOK({})", port.to_string()),
+            ResponseType::PortOK { port } => write!(f, "PortOK({})", port.to_string()),
         }
     }
 }
@@ -71,7 +70,7 @@ impl ResponseType {
 
     pub fn port_into_u16(self) -> Result<u16, &'static str> {
         match self {
-            ResponseType::StorePortOK { port } => Ok(port),
+            ResponseType::PortOK { port } => Ok(port),
             _ => Err("Attempted to convert wrong response type - expected Port"),
         }
     }
