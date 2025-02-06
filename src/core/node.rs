@@ -208,7 +208,7 @@ impl Node {
                 Some(chunk) => {
                     // Step 4: get the ALPHA closest nodes responsible for the chunk
                     let responsible_nodes = self
-                        .get_closest_nodes_responsible_for_chunk(chunk.clone())
+                        .get_closest_nodes_responsible_for_chunk(chunk.clone().hash)
                         .await?;
 
                     // Step 5: get ports for TCP data transfer
@@ -255,15 +255,15 @@ impl Node {
     ///
     /// Get ALPHA most responsive closest nodes for provided chunk.
     ///
-    async fn get_closest_nodes_responsible_for_chunk(&self, chunk: Chunk) -> Result<Vec<Response>> {
+    async fn get_closest_nodes_responsible_for_chunk(&self, chunk_id: Key) -> Result<Vec<Response>> {
         let closest_nodes = self
-            .find_node(chunk.clone().hash)
+            .find_node(chunk_id.clone())
             .await
             .expect("No closest nodes.");
 
         // Responsive nodes which did respond to initial request with StoreOK
         let mut responsive_nodes = self
-            .get_responsive_nodes_round(closest_nodes, chunk.hash)
+            .get_responsive_nodes_round(closest_nodes, chunk_id.clone())
             .await;
 
         if responsive_nodes.len() == 0 {
@@ -273,8 +273,8 @@ impl Node {
         responsive_nodes.sort_by(|a, b| {
             // Unwrap can be used here, because get_responsive_nodes_round does return
             // only valid responses as Some(response)
-            let dist_a = a.clone().unwrap().sender.id.distance(&chunk.hash);
-            let dist_b = b.clone().unwrap().sender.id.distance(&chunk.hash);
+            let dist_a = a.clone().unwrap().sender.id.distance(&chunk_id);
+            let dist_b = b.clone().unwrap().sender.id.distance(&chunk_id);
             dist_a.cmp(&dist_b)
         });
 
@@ -301,6 +301,7 @@ impl Node {
         let flatten = responsive_nodes.into_iter().flatten().collect();
         Ok(flatten)
     }
+
     ///
     /// Receive ports for establishing TCP connection
     ///
@@ -600,7 +601,42 @@ impl Node {
             }
         });
     }
+    pub fn find_value(&self, file_id: Key) {
+        let chunk_keys: Vec<Key> = Vec::new();
+
+
+    }
+
+    async fn get_chunk_value (&self, chunk_id: Key) -> Result<()> {
+        let responsible_nodes = self
+            .get_closest_nodes_responsible_for_chunk(chunk_id.clone())
+            .await?;
+
+        let mut ports = self
+            .provide_ports_for_nodes(responsible_nodes, chunk_id.clone())
+            .await?;
+
+
+    }
+
+
+    async fn provide_ports_for_nodes(&self, nodes: Vec<Response>, key: Key) -> Result<Vec<Response>> {
+        // Responsive nodes which did respond to initial request with StoreOK
+        let mut responsive_nodes = self
+            .request_available_ports_for_tcp_data_transfer(nodes, key)
+            .await;
+
+        if responsive_nodes.len() == 0 {
+            bail!("Unable to store file. No nodes are ready to accept TCP data transfer.");
+        }
+
+        // take ALPHA nodes which XOR distance it the smallest
+        let flatten = responsive_nodes.into_iter().flatten().collect();
+        Ok(flatten)
+    }
 }
+
+
 
 #[cfg(test)]
 mod tests {

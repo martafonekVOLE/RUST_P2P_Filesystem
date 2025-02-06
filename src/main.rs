@@ -138,7 +138,22 @@ async fn main() {
                         println!("Failed to store: {}", e);
                     }
                 }
-            }
+            },
+            "find_value" if parts.len() == 2 => match Key::from_hex_str(parts[1]) {
+                Ok(file_id) => {
+                    match node.find_value(file_id).await {
+                        Ok(()) => {
+                            println!("Successfully stored!");
+                        }
+                        Err(e) => {
+                            println!("Failed to store: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Invalid node ID: {}", e);
+                }
+            },
             "dump_rt" if parts.len() == 1 => {
                 let all_contacts = node.get_routing_table_content().await;
                 println!("Routing table content:");
@@ -148,7 +163,7 @@ async fn main() {
             }
             _ => {
                 eprintln!(
-                    "Unknown command '{}', should be 'dump_rt', 'find_node <key>', 'ping <key>'",
+                    "Unknown command '{}', should be 'dump_rt', 'find_node <key>', 'ping <key>', 'store <filepath>'",
                     parts[0]
                 );
             }
