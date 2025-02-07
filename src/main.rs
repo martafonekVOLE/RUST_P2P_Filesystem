@@ -64,6 +64,8 @@ async fn main() {
         .expect("Configuration error: node_port is missing or invalid.");
 
     // Create node
+    let mut node =
+        Arc::new(Node::new(Key::new_random(), ip.to_string(), port, config.storage_path).await);
     let mut node = Node::new(cache.key, ip.to_string(), port, config.storage_path).await;
 
     if let Some(routing_nodes) = &cache.routing_table_nodes {
@@ -78,7 +80,8 @@ async fn main() {
     }
 
     // Begin listening for incoming network traffic
-    node.start_listening();
+    let node_clone = Arc::clone(&node);
+    node_clone.start_listening();
 
     // Log the node port
     info!("Your node {} is listening at {}", node.key, node.address);
