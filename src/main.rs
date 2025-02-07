@@ -4,6 +4,7 @@ use clap::builder::TypedValueParser;
 use clap::Parser;
 use cli::args::Arguments;
 use log::{error, info, warn, LevelFilter};
+use p2p::cache::Cache;
 use p2p::config::Config;
 use p2p::constants::K;
 use p2p::core::key::Key;
@@ -12,6 +13,9 @@ use p2p::networking::node_info::NodeInfo;
 use p2p::utils::logging::init_logging;
 use public_ip;
 use std::io::BufRead;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() {
@@ -27,9 +31,27 @@ async fn main() {
     // For debug purposes
     init_logging(LevelFilter::Debug);
 
-    // Read and parse the configuration file
-    let config = Config::parse_from_file(&args.config, args.skip_join, args.port)
-        .expect("Failed to read configuration file");
+    // Read and parse the configuration & cache file
+    let mut cache = if let Some(cache_path) = args.cache {
+        // Load the cache from the cache file.
+        Cache::parse_from_file(&cache_path).expect("Failed to read cache file")
+    } else if let Some(config_path) = args.config {
+        // Load the configuration directly from the config file.
+        let config = Config::parse_from_file(&config_path, args.skip_join, args.port)
+            .expect("Failed to read configuration file");
+        // Construct a Cache object from the loaded configuration.
+        Cache {
+            key: Key::new_random(),
+            routing_table_nodes: None,
+            skip_join: args.skip_join,
+            config,
+        }
+    } else {
+        unreachable!("Either --cache or --config must be provided");
+    };
+
+    let config = cache.config.clone();
+
     // Get this node's IP
     let ip = config
         .resolve_ip_address()
@@ -42,7 +64,18 @@ async fn main() {
         .expect("Configuration error: node_port is missing or invalid.");
 
     // Create node
-    let mut node = Node::new(Key::new_random(), ip.to_string(), port, config.storage_path).await;
+    let mut node = Node::new(cache.key, ip.to_string(), port, config.storage_path).await;
+
+    if let Some(routing_nodes) = &cache.routing_table_nodes {
+        let mut rt = node.routing_table.write().await;
+        for node_info in routing_nodes {
+            let _ = rt.store_nodeinfo(node_info.clone());
+        }
+        info!(
+            "Loaded {} nodes into the routing table from cache.",
+            routing_nodes.len()
+        );
+    }
 
     // Begin listening for incoming network traffic
     node.start_listening();
@@ -50,7 +83,7 @@ async fn main() {
     // Log the node port
     info!("Your node {} is listening at {}", node.key, node.address);
 
-    if args.skip_join {
+    if cache.skip_join {
         warn!("Skipping network join! Only set --skip-join for the first node in a new network.");
     } else {
         // Create the beacon node's info
@@ -70,6 +103,40 @@ async fn main() {
                 return;
             }
         }
+    }
+
+    let cache_ref = Arc::new(Mutex::new(cache));
+    let node_ref = Arc::new(node.clone());
+
+    // Create cache file
+    if let Some(file_path) = config.cache_file_path.clone() {
+        let node_for_saver = Arc::clone(&node_ref);
+        let cache_for_saver = Arc::clone(&cache_ref);
+
+        tokio::spawn(async move {
+            let interval = Duration::from_secs(5);
+            loop {
+                // Fetch routing table from the node
+                let all_contacts = node_for_saver.get_routing_table_content().await;
+
+                // Lock the cache, update, then save
+                {
+                    // Lock the cache and unwrap the guard
+                    let mut locked_cache = cache_for_saver.lock().unwrap();
+
+                    // Now you can access the fields inside `Cache`
+                    locked_cache.routing_table_nodes = Some(all_contacts);
+
+                    // And call any methods as well
+                    if let Err(e) = locked_cache.save_to_file(&file_path) {
+                        eprintln!("Failed to save cache file: {}", e);
+                    }
+                }
+
+                // Sleep for 5 seconds
+                sleep(interval).await;
+            }
+        });
     }
 
     println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");

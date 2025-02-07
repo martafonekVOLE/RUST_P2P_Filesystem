@@ -31,11 +31,12 @@ use anyhow::{anyhow, bail, Result};
 use futures::FutureExt;
 use std::error::Error;
 
+#[derive(Clone)]
 pub struct Node {
     pub key: Key,
     pub address: SocketAddr,
     socket: Arc<TokioUdpSocket>, // Use Tokio's UdpSocket for async I/O
-    routing_table: Arc<RwLock<RoutingTable>>,
+    pub routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
     message_dispatcher: Arc<MessageDispatcher>,
     file_manager: Arc<FileManager>,

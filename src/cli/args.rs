@@ -1,16 +1,21 @@
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 
 #[derive(Parser, Debug)]
 #[clap(name = "Peer-to-peer System", version = "1.0.0", author = "TODO")]
+#[clap(group(
+    ArgGroup::new("input")
+        .required(true)
+        .args(&["config", "cache"])
+))]
 /// Peer-to-peer File Sharing System
 pub struct Arguments {
     #[arg(short, long, required = true)]
     /// Config file with node's configuration. In YAML format.
-    pub config: String,
+    pub config: Option<String>,
 
     #[arg(long)]
-    /// Use the cache logic. Dump config to cache file when turned off.
-    pub cache: bool,
+    /// TODO
+    pub cache: Option<String>,
 
     #[arg(short, long)]
     /// Log info about the ongoing communication to stdout. (For debugging purposes).
@@ -49,21 +54,32 @@ mod tests {
     use clap::Parser;
 
     #[test]
+    fn test_argument_parsing_with_config() {
+        let args = Arguments::parse_from(["test", "--config", "config.yaml"]);
+        // Since config is an Option, we use as_deref() to compare the inner &str.
+        assert_eq!(args.config.as_deref(), Some("config.yaml"));
+        // cache was not provided so it should be None.
+        assert!(args.cache.is_none());
+    }
+
+    #[test]
     fn test_argument_parsing_with_cache() {
-        let args = Arguments::parse_from(["test", "--config", "config.yaml", "--cache"]);
-        assert_eq!(args.config, "config.yaml");
-        assert!(args.cache);
+        let args = Arguments::parse_from(["test", "--cache", "cache.json"]);
+        // When only cache is provided, config remains None.
+        assert_eq!(args.cache.as_deref(), Some("cache.json"));
+        assert!(args.config.is_none());
     }
 
     #[test]
     fn test_argument_parsing_with_verbose() {
         let args = Arguments::parse_from(["test", "--config", "config.yaml", "--verbose"]);
-        assert_eq!(args.config, "config.yaml");
+        assert_eq!(args.config.as_deref(), Some("config.yaml"));
         assert!(args.verbose);
     }
 
     #[test]
-    fn test_argument_parsing_missing_config() {
+    fn test_argument_parsing_missing_input() {
+        // Neither --config nor --cache provided: error expected.
         let result = Arguments::try_parse_from(["test"]);
         assert!(result.is_err());
     }
