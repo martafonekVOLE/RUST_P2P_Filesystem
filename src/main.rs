@@ -12,10 +12,10 @@ use p2p::core::node::Node;
 use p2p::networking::node_info::NodeInfo;
 use p2p::utils::logging::init_logging;
 use public_ip;
-use tokio::time::sleep;
 use std::io::BufRead;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() {
@@ -40,7 +40,12 @@ async fn main() {
         let config = Config::parse_from_file(&config_path, args.skip_join, args.port)
             .expect("Failed to read configuration file");
         // Construct a Cache object from the loaded configuration.
-        Cache { key: Key::new_random(), routing_table_nodes: None, skip_join: args.skip_join, config }
+        Cache {
+            key: Key::new_random(),
+            routing_table_nodes: None,
+            skip_join: args.skip_join,
+            config,
+        }
     } else {
         unreachable!("Either --cache or --config must be provided");
     };
@@ -66,7 +71,10 @@ async fn main() {
         for node_info in routing_nodes {
             let _ = rt.store_nodeinfo(node_info.clone());
         }
-        info!("Loaded {} nodes into the routing table from cache.", routing_nodes.len());
+        info!(
+            "Loaded {} nodes into the routing table from cache.",
+            routing_nodes.len()
+        );
     }
 
     // Begin listening for incoming network traffic
@@ -99,7 +107,7 @@ async fn main() {
 
     let cache_ref = Arc::new(Mutex::new(cache));
     let node_ref = Arc::new(node.clone());
-    
+
     // Create cache file
     if let Some(file_path) = config.cache_file_path.clone() {
         let node_for_saver = Arc::clone(&node_ref);
@@ -115,10 +123,10 @@ async fn main() {
                 {
                     // Lock the cache and unwrap the guard
                     let mut locked_cache = cache_for_saver.lock().unwrap();
-                    
+
                     // Now you can access the fields inside `Cache`
                     locked_cache.routing_table_nodes = Some(all_contacts);
-                
+
                     // And call any methods as well
                     if let Err(e) = locked_cache.save_to_file(&file_path) {
                         eprintln!("Failed to save cache file: {}", e);

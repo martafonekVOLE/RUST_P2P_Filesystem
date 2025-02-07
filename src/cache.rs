@@ -1,4 +1,7 @@
-use std::{fs::{create_dir_all, File}, path::Path};
+use std::{
+    fs::{create_dir_all, File},
+    path::Path,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +30,7 @@ impl Cache {
                 create_dir_all(parent)?;
             }
         }
-        
+
         let file = File::create(file_path)?;
         serde_json::to_writer_pretty(file, self)?;
         Ok(())
