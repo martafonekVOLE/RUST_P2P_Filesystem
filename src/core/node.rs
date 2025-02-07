@@ -1,13 +1,13 @@
 use crate::constants::PING_TIMEOUT_MILLISECONDS;
 use crate::constants::{ALPHA, LOOKUP_TIMEOUT_MILLISECONDS};
-use crate::core::incoming_request_handler::handle_received_request;
+use crate::core::incoming_request_handler::*;
 use crate::core::key::Key;
 use crate::core::lookup::{LookupBuffer, LookupResponse};
 use crate::networking::message_dispatcher::MessageDispatcher;
 use crate::networking::messages::{Request, RequestType, Response, ResponseType};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
-use crate::routing::routing_table::RoutingTable;
+use crate::routing::routing_table::{RoutingTable, RoutingTableError};
 use crate::sharding::common::Chunk;
 use crate::sharding::uploader::FileUploader;
 use crate::storage::file_manager::FileManager;
@@ -31,7 +31,22 @@ use anyhow::{anyhow, bail, Result};
 use futures::FutureExt;
 use std::error::Error;
 
-#[derive(Clone)]
+use thiserror::Error;
+
+#[derive(Error, Debug, PartialEq)]
+pub enum NodeError {
+    #[error("No response received on the channel")]
+    BadResponse,
+    #[error("Timed out awaiting response")]
+    ResponseTimeout,
+    #[error("Unable to send request via dispatcher")]
+    UnableToSend,
+    #[error("PING failed. Node not in routing table")]
+    PingMissingNode,
+    #[error("Routing table failed")]
+    RoutingTableFailed(#[from] RoutingTableError),
+}
+
 pub struct Node {
     pub key: Key,
     pub address: SocketAddr,
@@ -90,7 +105,7 @@ impl Node {
         &self,
         request: Request,
         timeout_milliseconds: u64,
-    ) -> Result<Response> {
+    ) -> Result<Response, NodeError> {
         let request_id = request.request_id;
 
         // Create a one-shot channel that will get the response from the receiving loop
@@ -103,7 +118,7 @@ impl Node {
 
         // Send message
         if let Err(_send_err) = self.message_dispatcher.send_request(request).await {
-            bail!("Unable to send request via dispatcher.");
+            return Err(NodeError::UnableToSend); //"Unable to send request via dispatcher."
         }
 
         // Await the response from the channel, with given timeout.
@@ -111,12 +126,13 @@ impl Node {
             // Received something from the channel
             Ok(Ok(response)) => Ok(response),
             // The sender was dropped or otherwise no data came
-            Ok(Err(_)) => bail!("No response received on the channel."),
+            Ok(Err(_)) => Err(NodeError::BadResponse),
             // Timeout expired
             Err(_) => {
                 // Remove the request from the map
                 self.request_map.remove_request(&request_id).await;
-                bail!("Timed out awaiting response.")
+                // "Timed out awaiting response."
+                Err(NodeError::ResponseTimeout)
             }
         }
     }
@@ -125,11 +141,12 @@ impl Node {
     /// Sends a PING request to the specified node ID.
     /// Awaits a PONG response and returns whether the node is reachable.
     ///
-    pub async fn ping(&self, node_id: Key) -> Result<Response> {
+    pub async fn ping(&self, node_id: Key) -> Result<Response, NodeError> {
         // Get the address from the RoutingTable
         let receiver_info = match self.routing_table.read().await.get_nodeinfo(&node_id)? {
             Some(info) => info.clone(),
-            None => bail!("PING failed. Node not in routing table."),
+
+            None => return Err(NodeError::PingMissingNode),
         };
 
         let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
@@ -180,7 +197,7 @@ impl Node {
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
         for node_info in lookup_buffer.get_responsive_nodes() {
-            routing_table.store_nodeinfo(node_info);
+            routing_table.store_nodeinfo(node_info, &self);
         }
 
         // Render the final result
@@ -446,7 +463,8 @@ impl Node {
         self.routing_table
             .write()
             .await
-            .store_nodeinfo(beacon_node.clone())
+            .store_nodeinfo(beacon_node.clone(), &self)
+            .await
             .expect("Failed to add beacon node to RT");
 
         self.ping(beacon_node.id).await?;
@@ -495,7 +513,7 @@ impl Node {
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
         for node_info in lookup_buffer.get_responsive_nodes() {
-            routing_table.store_nodeinfo(node_info)?;
+            routing_table.store_nodeinfo(node_info, &self).await?;
         }
 
         info!("Successfully joined the network!");
@@ -564,7 +582,7 @@ impl Node {
     /// Incoming messages are parsed and dispatched to the appropriate handler.
     /// This method is non-blocking and runs in the background.
     ///
-    pub fn start_listening(&self) {
+    pub fn start_listening(self: Arc<Self>) {
         // Load references to the fields of the Node struct
         let socket = Arc::clone(&self.socket);
         let routing_table = Arc::clone(&self.routing_table);
@@ -594,8 +612,10 @@ impl Node {
                             let message_dispatcher = Arc::clone(&message_dispatcher);
                             let shard_manager = Arc::clone(&shard_manager);
                             let this_node_info = this_node_info.clone();
+                            let this = self.clone();
                             task::spawn(async move {
                                 handle_received_request(
+                                    this,
                                     this_node_info,
                                     request,
                                     routing_table,
@@ -628,11 +648,13 @@ mod tests {
     #[tokio::test]
     async fn test_ping_response() -> Result<(), Box<dyn std::error::Error>> {
         let key = Key::new_random();
-        let node = Node::new(key.clone(), "127.0.0.1".to_string(), 8081, "/".to_string()).await;
+        let node =
+            Arc::new(Node::new(key.clone(), "127.0.0.1".to_string(), 8081, "/".to_string()).await);
         let node_address = node.address;
 
+        let node_clone = Arc::clone(&node);
         // Start the listener so the node can receive requests.
-        node.start_listening();
+        node_clone.start_listening();
 
         // Create a Ping request from a separate ephemeral socket.
         let ephemeral_socket = UdpSocket::bind("127.0.0.1:0").await?;

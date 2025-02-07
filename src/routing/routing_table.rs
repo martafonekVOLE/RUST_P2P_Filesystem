@@ -1,6 +1,7 @@
 use super::kbucket::*;
 use crate::constants::{ALPHA, K};
 use crate::core::key::Key;
+use crate::core::node::Node;
 use crate::networking::node_info::NodeInfo;
 
 use thiserror::Error;
@@ -19,12 +20,6 @@ pub enum RoutingTableError {
     KBucketFailed(#[from] KBucketError),
     #[error("Attempting to store self")]
     AttempStoreSelf,
-}
-
-impl From<RoutingTableError> for String {
-    fn from(error: RoutingTableError) -> Self {
-        error.to_string()
-    }
 }
 
 pub struct RoutingTable {
@@ -47,10 +42,14 @@ impl RoutingTable {
         }
     }
 
-    pub fn store_nodeinfo(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
+    pub async fn store_nodeinfo(
+        &mut self,
+        node_info: NodeInfo,
+        node: &Node,
+    ) -> Result<(), RoutingTableError> {
         let bucket_index = self.get_bucket_index(&node_info.get_id())?;
         if let Some(bucket) = self.buckets.get_mut(bucket_index) {
-            bucket.add_nodeinfo(node_info)?;
+            bucket.add_nodeinfo(node_info, node).await?;
             Ok(())
         } else {
             Err(RoutingTableError::BucketNotFoundForId {
@@ -59,12 +58,25 @@ impl RoutingTable {
         }
     }
 
-    pub fn store_nodeinfo_multiple(
+    fn store_nodeinfo_limited(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
+        let bucket_index = self.get_bucket_index(&node_info.get_id())?;
+        if let Some(bucket) = self.buckets.get_mut(bucket_index) {
+            bucket.add_nodeinfo_limited(node_info)?;
+            Ok(())
+        } else {
+            Err(RoutingTableError::BucketNotFoundForId {
+                id: node_info.get_id(),
+            })
+        }
+    }
+
+    pub async fn store_nodeinfo_multiple(
         &mut self,
         node_infos: Vec<NodeInfo>,
+        node: &Node,
     ) -> Result<(), RoutingTableError> {
         for node_info in node_infos {
-            self.store_nodeinfo(node_info)?;
+            self.store_nodeinfo(node_info, node).await?;
         }
         Ok(())
     }
@@ -219,7 +231,7 @@ mod tests {
             */
             for _ in 0..num_nodes {
                 let node = NodeInfo::new_local(Key::new_random());
-                self.store_nodeinfo(node).unwrap_or_default();
+                self.store_nodeinfo_limited(node).unwrap_or_default();
             }
         }
 
@@ -240,7 +252,9 @@ mod tests {
                     let lz_true = self.id.leading_zeros_in_distance(&key);
                     assert!(lz_true == lz);
 
-                    bucket.add_nodeinfo(NodeInfo::new_local(key)).unwrap();
+                    bucket
+                        .add_nodeinfo_limited(NodeInfo::new_local(key))
+                        .unwrap();
                 }
             }
         }
@@ -287,7 +301,7 @@ mod tests {
         let remote_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
         let node_info = NodeInfo::new(remote_id, remote_address);
 
-        match routing_table.store_nodeinfo(node_info.clone()) {
+        match routing_table.store_nodeinfo_limited(node_info.clone()) {
             Ok(()) => (),
             Err(err) => eprintln!(
                 "Failed to store nodeinfo with key: {}. My key: {}. {}",
@@ -333,9 +347,9 @@ mod tests {
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8082),
         );
 
-        routing_table.store_nodeinfo(node1.clone()).unwrap();
-        routing_table.store_nodeinfo(node2.clone()).unwrap();
-        routing_table.store_nodeinfo(node3.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node1.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node2.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node3.clone()).unwrap();
 
         let num_fetch = 3;
 
@@ -366,9 +380,9 @@ mod tests {
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8082),
         );
 
-        routing_table.store_nodeinfo(node1.clone()).unwrap();
-        routing_table.store_nodeinfo(node2.clone()).unwrap();
-        routing_table.store_nodeinfo(node3.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node1.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node2.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node3.clone()).unwrap();
 
         let num_fetch = 3;
 
@@ -428,10 +442,10 @@ mod tests {
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8083),
         );
 
-        routing_table.store_nodeinfo(node1.clone()).unwrap();
-        routing_table.store_nodeinfo(node2.clone()).unwrap();
-        routing_table.store_nodeinfo(node3.clone()).unwrap();
-        routing_table.store_nodeinfo(node4.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node1.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node2.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node3.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node4.clone()).unwrap();
 
         key[0] = 0b00000000;
         key[1] = 0b00000001;
