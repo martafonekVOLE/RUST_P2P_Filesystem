@@ -1,6 +1,6 @@
 use crate::core::key::Key as Hash;
 use crate::networking::node_info::NodeInfo;
-use crate::sharding::common::{Chunk, CHUNK_SIZE_KB_LARGE, CHUNK_SIZE_KB_SMALL};
+use crate::sharding::common::{Chunk, CHUNK_READ_KB_LARGE, CHUNK_SIZE_KB_LARGE};
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
 use crate::utils::testing::to_unix_path;
 use anyhow::{anyhow, bail, Result};
@@ -182,8 +182,9 @@ mod tests {
 
     fn create_test_chunk() -> Chunk {
         Chunk {
-            data: vec![0; CHUNK_SIZE_KB_SMALL],
+            data: vec![0; CHUNK_SIZE_KB_LARGE],
             hash: Hash::new_random(),
+            decrypted_data_unpadded_size: CHUNK_READ_KB_LARGE,
         }
     }
 
