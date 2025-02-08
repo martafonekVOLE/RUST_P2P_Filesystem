@@ -1,4 +1,5 @@
-use anyhow::bail;
+use crate::constants::TCP_TIMEOUT_MILLISECONDS;
+use anyhow::{bail, Context};
 use log::{error, info};
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
@@ -14,20 +15,14 @@ pub struct TcpListenerService {
 
 impl TcpListenerService {
     pub async fn new() -> Result<TcpListenerService, anyhow::Error> {
-        let tcp_listener = match TcpListener::bind(LOCALHOST).await {
-            Ok(listener) => listener,
-            Err(e) => {
-                bail!("Error opening TCP Listener.");
-            }
-        };
+        let tcp_listener = TcpListener::bind(LOCALHOST)
+            .await
+            .with_context(|| format!("Error opening TCP Listener at {}", LOCALHOST))?;
 
-        let port = match tcp_listener.local_addr() {
-            Ok(addr) => addr,
-            Err(e) => {
-                bail!("Error reading Socket Address.");
-            }
-        }
-        .port();
+        let port = tcp_listener
+            .local_addr()
+            .context("Error reading the local socket address")?
+            .port();
 
         Ok(TcpListenerService {
             listener: tcp_listener,
@@ -44,29 +39,29 @@ impl TcpListenerService {
     }
 
     pub async fn receive_data(&self) -> Result<Vec<u8>, anyhow::Error> {
-        match timeout(Duration::from_secs(10), self.listener.accept()).await {
-            Ok(Ok((mut stream, _addr))) => {
-                info!("Established TCP connection.");
+        // Wait for a connection with a timeout.
+        let (mut stream, _addr) = timeout(
+            Duration::from_secs(TCP_TIMEOUT_MILLISECONDS),
+            self.listener.accept(),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "Timed out after {} seconds while waiting for a TCP connection",
+                TCP_TIMEOUT_MILLISECONDS
+            )
+        })??;
 
-                let mut data = Vec::new();
-                let received_bytes = stream.read_to_end(&mut data).await;
+        info!("Established TCP connection: {:?}", stream);
 
-                match received_bytes {
-                    Ok(_) => {
-                        info!("Successfully received the data over TCP.");
-                        Ok(data)
-                    }
-                    Err(_) => {
-                        bail!("An error has occurred while reading the TCP Stream.");
-                    }
-                }
-            }
-            Ok(Err(_err)) => {
-                bail!("Failure while accepting data.");
-            }
-            Err(_) => {
-                bail!("Timed out while waiting for connection.");
-            }
-        }
+        // Read data from the stream.
+        let mut data = Vec::new();
+        stream
+            .read_to_end(&mut data)
+            .await
+            .with_context(|| "An error occurred while reading data from the TCP stream")?;
+
+        info!("Successfully received data over TCP.");
+        Ok(data)
     }
 }

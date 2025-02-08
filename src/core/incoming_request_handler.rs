@@ -56,7 +56,7 @@ pub async fn handle_received_request(
             )
             .await;
         }
-        RequestType::Store { file_id } => {
+        RequestType::Store { chunk_id: file_id } => {
             handle_store_message(
                 this_node_info,
                 request,
@@ -66,7 +66,7 @@ pub async fn handle_received_request(
             )
             .await;
         }
-        RequestType::GetPort { file_id } => {
+        RequestType::GetPort { chunk_id: file_id } => {
             handle_get_port_message(
                 this_node_info,
                 request,
@@ -180,7 +180,7 @@ async fn handle_find_value_message(
     let response = Response::new(
         ResponseType::HasValue { chunk_id: target },
         this_node_info,         // Sender field
-        request.sender.clone(), // Receiver field
+        request.sender.clone(), // Receiver fiel
         request.request_id,
     );
 
@@ -194,18 +194,21 @@ async fn handle_find_value_message(
 ///
 async fn handle_get_value(request: Request, port: u16) {
     // Get chunk from storage and convert it to data (Vec<u8>)
-    let data = Vec::new();
+    let data = Vec::new(); // TODO: get chunk from storage
 
     // This will get the chunk from storage
-    let address = request.sender.address.ip().to_string() + ":" + port.to_string().as_str();
-    let mut stream = TcpStream::connect(address)
-        .await
-        .expect("Unable to connect to the TCP Stream.");
+    let address = format!("{}:{}", request.sender.address.ip(), port);
+    let mut stream = match TcpStream::connect(&address).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Unable to connect to the TCP Stream at {}: {}", address, e);
+            return;
+        }
+    };
 
-    stream
-        .write_all(data.as_slice())
-        .await
-        .expect("Unable to write data.");
+    if let Err(e) = stream.write_all(data.as_slice()).await {
+        error!("Unable to write data to TCP Stream at {}: {}", address, e);
+    }
 }
 
 ///
@@ -225,33 +228,32 @@ async fn handle_store_message(
         .read()
         .await
         .is_chunk_already_stored(&file_id);
-    let response = match chunk_exists {
-        false => {
-            Response::new(
-                ResponseType::StoreOK,
-                this_node_info,         // Sender field
-                request.sender.clone(), // Receiver field
-                request.request_id,
-            )
-        }
-        true => {
-            shard_storage_manager
-                .write()
-                .await
-                .update_chunk_upload_time(&file_id)
-                .expect("Unable to update TTL.");
 
-            Response::new(
-                ResponseType::StoreChunkUpdated,
-                this_node_info,         // Sender field
-                request.sender.clone(), // Receiver field
-                request.request_id,
-            )
+    let response = if !chunk_exists {
+        Response::new(
+            ResponseType::StoreOK,
+            this_node_info,         // Sender field.
+            request.sender.clone(), // Receiver field.
+            request.request_id,
+        )
+    } else {
+        if let Err(e) = shard_storage_manager
+            .write()
+            .await
+            .update_chunk_upload_time(&file_id)
+        {
+            error!("Unable to update TTL for chunk {}: {}", file_id, e);
         }
+        Response::new(
+            ResponseType::StoreChunkUpdated,
+            this_node_info,         // Sender field.
+            request.sender.clone(), // Receiver field.
+            request.request_id,
+        )
     };
 
     if let Err(e) = message_dispatcher.send_response(response).await {
-        error!("Failed to send StoreOK response: {}", e);
+        error!("Failed to send STORE response: {}", e);
     }
 }
 
@@ -264,63 +266,68 @@ async fn handle_get_port_message(
 ) {
     let tcp_listener_service = match TcpListenerService::new().await {
         Ok(listener) => listener,
-        Err(E) => {
-            error!("TCP Listener failed.");
+        Err(e) => {
+            error!("TCP Listener failed: {}", e);
             return;
         }
     };
 
     let port = tcp_listener_service.get_port();
 
-    // Store node into active TCP connections
-    if let Some(insert) = shard_storage_manager
+    if let Some(insert_error) = shard_storage_manager
         .write()
         .await
-        .add_active_tcp_connection(port, request.sender.clone(), file_id.clone())
+        .add_active_tcp_connection(port, request.sender.clone(), file_id)
     {
-        error!("Unable to store a connection.");
+        error!(
+            "Unable to store a connection for file_id {} on port {}: {:?}",
+            file_id, port, insert_error
+        );
         return;
     }
 
-    // Respond with a PORT_OK message.
     let response = Response::new(
         ResponseType::PortOK { port },
-        this_node_info,         // Sender field
-        request.sender.clone(), // Receiver field
+        this_node_info,         // Sender field.
+        request.sender.clone(), // Receiver field.
         request.request_id,
     );
 
     if let Err(e) = message_dispatcher.send_response(response).await {
-        error!("Failed to send StorePortOk response: {}", e);
+        error!("Failed to send PORT_OK response: {}", e);
         return;
     }
 
-    // Wait for TCP stream
     tokio::spawn(async move {
-        let data = tcp_listener_service
-            .receive_data()
-            .await
-            .expect("Unable to receive data");
-        handle_tcp_upload(data, port, &shard_storage_manager).await;
+        match tcp_listener_service.receive_data().await {
+            Ok(data) => handle_tcp_upload(data, port, &shard_storage_manager).await,
+            Err(e) => error!(
+                "Unable to receive data from TCP listener on port {}: {}",
+                port, e
+            ),
+        }
     });
 }
 
 ///
-///
+/// Stores the received data to the storage.
 ///
 async fn handle_tcp_upload(
     data: Vec<u8>,
     port: u16,
     shard_storage_manager: &Arc<RwLock<ShardStorageManager>>,
 ) {
-    shard_storage_manager
+    if let Err(e) = shard_storage_manager
         .write()
         .await
         .store_chunk_for_known_peer(data, port)
         .await
-        .expect("Failed to save shard to storage");
+    {
+        error!("Failed to save shard to storage on port {}: {}", port, e);
+        return;
+    }
 
-    info!("Successfully stored the received data.");
+    info!("Successfully stored the received data on port {}.", port);
 }
 
 ///

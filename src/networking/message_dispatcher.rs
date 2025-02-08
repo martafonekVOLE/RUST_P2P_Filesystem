@@ -1,7 +1,8 @@
-use crate::networking::messages::{Request, Response};
+use crate::constants::K;
+use crate::networking::messages::{Request, Response, MAX_MESSAGE_SIZE};
+use anyhow::{bail, Context, Result};
 use log::info;
 use serde_json;
-use std::io::Error;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
@@ -10,54 +11,63 @@ pub struct MessageDispatcher {
 }
 
 impl MessageDispatcher {
-    ///
     /// Creates a new MessageDispatcher with a single UDP socket.
-    /// For future iterations, this could be expanded to support multiple sockets in a pool.
-    ///
-    pub async fn new() -> Self {
+    pub async fn new() -> Result<Self> {
         let socket = UdpSocket::bind("0.0.0.0:0")
             .await
-            .expect("Failed to bind UDP socket");
-
-        MessageDispatcher {
+            .with_context(|| "Failed to bind UDP socket")?;
+        Ok(MessageDispatcher {
             socket: Mutex::new(socket),
-        }
+        })
     }
 
-    ///
-    /// Sends a request the single UDP socket.
-    /// Uses lock to abstract away the thread safety of the socket.
-    ///
-    pub async fn send_request(&self, request: Request) -> Result<usize, Error> {
+    /// Sends a request using the single UDP socket.
+    /// Checks the serialized size against MAX_MESSAGE_SIZE before sending.
+    pub async fn send_request(&self, request: Request) -> Result<usize> {
         if request.receiver == request.sender {
-            return Err(Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Sender and receiver must not be the same (possible message to self)",
-            ));
+            bail!("Sender and receiver must not be the same (possible message to self)");
         }
 
         let serialized_request =
-            serde_json::to_vec(&request).expect("Failed to serialize request type");
+            serde_json::to_vec(&request).with_context(|| "Failed to serialize request type")?;
+
+        if serialized_request.len() > MAX_MESSAGE_SIZE {
+            bail!(
+                "Serialized request size {} exceeds maximum allowed size {}",
+                serialized_request.len(),
+                MAX_MESSAGE_SIZE
+            );
+        }
+
         let socket = self.socket.lock().await;
         let len = socket
             .send_to(&serialized_request, request.receiver.address)
-            .await?;
+            .await
+            .with_context(|| format!("Failed to send request to {}", request.receiver.address))?;
 
         info!("Sent request: {}", request);
         Ok(len)
     }
 
-    ///
     /// Sends a response using the single UDP socket.
-    /// Uses lock to abstract away the thread safety of the socket.
-    ///
-    pub async fn send_response(&self, response: Response) -> Result<usize, Error> {
+    /// Checks the serialized size against MAX_MESSAGE_SIZE before sending.
+    pub async fn send_response(&self, response: Response) -> Result<usize> {
         let serialized_response =
-            serde_json::to_vec(&response).expect("Failed to serialize response type");
+            serde_json::to_vec(&response).with_context(|| "Failed to serialize response type")?;
+
+        if serialized_response.len() > MAX_MESSAGE_SIZE {
+            bail!(
+                "Serialized response size {} exceeds maximum allowed size {}",
+                serialized_response.len(),
+                MAX_MESSAGE_SIZE
+            );
+        }
+
         let socket = self.socket.lock().await;
         let len = socket
             .send_to(&serialized_response, response.receiver.address)
-            .await?;
+            .await
+            .with_context(|| format!("Failed to send response to {}", response.receiver.address))?;
 
         info!("Sent response: {}", response);
         Ok(len)
