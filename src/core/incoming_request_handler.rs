@@ -151,7 +151,12 @@ async fn handle_find_node_message(
 }
 
 ///
+/// Handles FIND_VALUE requests.
+/// Returns the K closest nodes to the requested `key` when
+/// none of the nodes has direct access to a file with the
+/// same key or a single node which has the key.
 ///
+/// For single node, this returns HAS_VALUE.
 ///
 async fn handle_find_value_message(
     this_node_info: NodeInfo,
@@ -166,6 +171,8 @@ async fn handle_find_value_message(
         .await
         .is_chunk_already_stored(&target);
 
+    // If the chunk is not present in the storage, it behaves
+    // like response for FIND_NODE.
     if !chunk_exists {
         handle_find_node_message(
             this_node_info,
@@ -178,7 +185,7 @@ async fn handle_find_value_message(
         return;
     }
 
-    // Respond with a PONG message.
+    // Respond with a HAS_VALUE message.
     let response = Response::new(
         ResponseType::HasValue { chunk_id: target },
         this_node_info,         // Sender field
@@ -192,7 +199,13 @@ async fn handle_find_value_message(
 }
 
 ///
+/// Handles GET_VALUE requests.
+/// Receiving that request type does instruct the node,
+/// that it will transfer some of its data to the
+/// requesting node.
 ///
+/// Receiving node connects to a TCP stream and starts
+/// sending requested data.
 ///
 async fn handle_get_value(request: Request, port: u16) {
     // Get chunk from storage and convert it to data (Vec<u8>)
@@ -221,8 +234,8 @@ async fn handle_store_message(
     shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
     file_id: Key,
 ) {
-    // TODO: check first if chunk with this hash is already stored,
-    // in this case send response that chunk is already stored and just update TTL or smth.
+    // Check first if chunk with this hash is already stored,
+    // in this case send response that chunk is already stored and just update TTL.
     let chunk_exists = shard_storage_manager
         .read()
         .await
@@ -257,6 +270,12 @@ async fn handle_store_message(
     }
 }
 
+///
+/// Handles GET_PORT message.
+/// This request type does instruct node to open a TCP Listener
+/// and provide the other node with port. The other node should
+/// send data over this TCP connection.
+///
 async fn handle_get_port_message(
     this_node_info: NodeInfo,
     request: Request,
@@ -266,7 +285,7 @@ async fn handle_get_port_message(
 ) {
     let tcp_listener_service = match TcpListenerService::new().await {
         Ok(listener) => listener,
-        Err(E) => {
+        Err(_) => {
             error!("TCP Listener failed.");
             return;
         }
@@ -275,7 +294,7 @@ async fn handle_get_port_message(
     let port = tcp_listener_service.get_port();
 
     // Store node into active TCP connections
-    if let Some(insert) = shard_storage_manager
+    if let Some(_insert) = shard_storage_manager
         .write()
         .await
         .add_active_tcp_connection(port, request.sender.clone(), file_id.clone())
@@ -308,7 +327,8 @@ async fn handle_get_port_message(
 }
 
 ///
-///
+/// This method does handle data, which were received over
+/// established TCP connection. Data are stored.
 ///
 async fn handle_tcp_upload(
     data: Vec<u8>,

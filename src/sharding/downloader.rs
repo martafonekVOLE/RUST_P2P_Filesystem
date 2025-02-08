@@ -40,14 +40,14 @@ impl FileDownloader {
         }
 
         let chunk_metadata = &self.file_metadata.chunks_metadata[self.chunk_index];
-        
+
         let mut decrypted_chunk_data = encryption::decrypt_payload(
             &chunk.data,
             &self.file_metadata.encryption_key,
             &chunk_metadata.nonce,
         )
         .map_err(|_| ShardingError::DecryptionFailed)?;
-        
+
         // TODO: don't need to compare the hash because AUTH TAG already ensures integrity
         if chunk.hash != chunk_metadata.hash {
             return Err(ShardingError::ChunkHashMismatch);

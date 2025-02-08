@@ -210,58 +210,54 @@ impl Node {
     }
 
     ///
-    /// Method handling file uploads
+    /// This method handles file uploads in multiple steps.
+    /// First, it checks whether the requested file exists. If it does, the file is split
+    /// into small chunks, which are then stored in the network one by one.
+    ///
+    /// For each chunk, the FIND_NODE method is called, and from the responding nodes,
+    /// the ALPHA closest ones (based on the XOR metric) are selected. A GET_PORT
+    /// message is then sent to these ALPHA nodes, instructing them to provide a port for
+    /// a TCP connection. The data is subsequently transferred to all nodes that provided
+    /// a port.
     ///
     pub async fn store(&self, file_path: &str) -> Result<()> {
-        // Step 1: check file existence
-        let file_exists = fs::exists(file_path).expect("Unable to check file existence.");
+        // Check file existence
+        let file_exists = fs::exists(file_path)?;
         if !file_exists {
             return Err(anyhow!("Unable to open specified file. Check the path."));
         }
 
-        // Step 2: call start sharding
+        // Start sharding
         let mut uploader = FileUploader::new(file_path).await?;
 
-        // Step 3: loop over shards
+        // Loop over shards
         loop {
-            // Step 3.1: get next shard
+            // Get next shard
             let chunk = uploader.get_next_chunk().await?;
 
             match chunk {
                 Some(chunk) => {
-                    // Step 4: get the ALPHA closest nodes responsible for the chunk
+                    // Get the ALPHA closest nodes responsible for the chunk
                     let responsible_nodes = self
                         .get_closest_nodes_responsible_for_chunk(chunk.clone().hash)
                         .await?;
 
-                    // Step 5: get ports for TCP data transfer
+                    // Receive ports for TCP data transfer
                     let mut ports = self
-                        .get_ports_for_nodes(responsible_nodes, chunk.clone().hash, true)
-                        .await?;
+                        .request_available_ports_for_tcp_data_transfer(
+                            responsible_nodes,
+                            chunk.clone().hash,
+                        )
+                        .await;
 
-                    if ports.len() == 0 {
-                        bail!("No port returned from nodes.");
+                    if ports.is_empty() {
+                        bail!(
+                            "Unable to store file. No nodes are ready to accept TCP data transfer."
+                        );
                     }
 
-                    // Step 6: send data to each node over TCP
-                    let established_connection = ports
-                        .into_iter()
-                        .map(|node_with_port| {
-                            self.establish_tcp_stream_and_send_data(
-                                node_with_port.clone(),
-                                chunk.clone().data,
-                            )
-                        })
-                        .collect::<Vec<_>>();
-
-                    let sent_to_nodes = join_all(established_connection).await;
-
-                    if sent_to_nodes.len() > 0 {
-                        println!("Chunk successfully uploaded.");
-                    } else {
-                        // Future-improvement: Chunk may be sent again to different nodes.
-                        bail!("Chunk was not sent!");
-                    }
+                    // Send data to each node over TCP
+                    self.store_chunk(ports.clone(), chunk.clone()).await?;
                 }
                 None => {
                     break;
@@ -269,106 +265,99 @@ impl Node {
             }
         }
 
-        // Step 7: save info to FileManager
+        // Save file info to FileManager
         self.file_manager.add_file_uploaded_entry(file_path).await;
 
         Ok(())
     }
 
     ///
-    /// Get ALPHA most responsive closest nodes for provided chunk.
+    /// Determines which responsive nodes are responsible for a
+    /// chunk and does return ALPHA closest of them. The distance
+    /// is calculated using the XOR metric.
     ///
     async fn get_closest_nodes_responsible_for_chunk(
         &self,
         chunk_id: Key,
     ) -> Result<Vec<Response>> {
-        let closest_nodes = self
-            .find_node(chunk_id.clone())
-            .await
-            .expect("No closest nodes.");
+        // Receive k closest nodes
+        let closest_nodes = self.find_node(chunk_id.clone()).await?;
 
-        // Responsive nodes which did respond to initial request with StoreOK
+        // Ask the closest nodes for a possibility to upload a file.
         let mut responsive_nodes = self
             .get_responsive_nodes_round(closest_nodes, chunk_id.clone())
             .await;
 
-        if responsive_nodes.len() == 0 {
+        if responsive_nodes.is_empty() {
             bail!("Unable to store file. No responsive nodes.");
         }
 
+        // Sort the responsive nodes based on XOR distance
         responsive_nodes.sort_by(|a, b| {
-            // Unwrap can be used here, because get_responsive_nodes_round does return
-            // only valid responses as Some(response)
-            let dist_a = a.clone().unwrap().sender.id.distance(&chunk_id);
-            let dist_b = b.clone().unwrap().sender.id.distance(&chunk_id);
+            let dist_a = a.clone().sender.id.distance(&chunk_id);
+            let dist_b = b.clone().sender.id.distance(&chunk_id);
             dist_a.cmp(&dist_b)
         });
 
-        // take ALPHA nodes where XOR distance is the smallest
+        // Take ALPHA nodes with the smallest distance
         let alpha_nodes = responsive_nodes.into_iter().flatten().take(ALPHA).collect();
 
         Ok(alpha_nodes)
     }
 
     ///
-    /// This method returns a vector of nodes, which responded with PORT. That means
-    /// that those are ready to accept a TCP data transfer.
-    ///
-    async fn get_ports_for_nodes(
-        &self,
-        nodes: Vec<Response>,
-        key: Key,
-        is_store: bool,
-    ) -> Result<Vec<Response>> {
-        // Responsive nodes which did respond to initial request with StoreOK
-        let mut responsive_nodes = self
-            .request_available_ports_for_tcp_data_transfer(nodes, key)
-            .await;
-
-        if responsive_nodes.len() == 0 {
-            bail!("Unable to store file. No nodes are ready to accept TCP data transfer.");
-        }
-
-        // take ALPHA nodes which XOR distance it the smallest
-        let flatten = responsive_nodes.into_iter().flatten().collect();
-        Ok(flatten)
-    }
-
-    ///
-    /// Receive ports for TCP connection
+    /// Method returns a vector of nodes, which provided the port.
+    /// for TCP data transfer and so are ready to accept data.
     ///
     async fn request_available_ports_for_tcp_data_transfer(
         &self,
         nodes: Vec<Response>,
         key: Key,
-    ) -> Vec<Option<Response>> {
+    ) -> Vec<Response> {
         let nodes_with_ports = nodes
             .into_iter()
-            .map(|closest_node| self.send_store_port_request(closest_node.sender, key))
+            .map(|closest_node| self.send_get_port_request(closest_node.sender, key))
             .collect::<Vec<_>>();
 
-        join_all(nodes_with_ports).await
+        // Run all lookups in parallel and remove those which did not respond.
+        join_all(nodes_with_ports)
+            .await
+            .into_iter()
+            .filter_map(|res| res)
+            .collect::<Vec<Response>>()
     }
 
     ///
-    ///
+    /// This is a method which does contact multiple nodes in parallel.
+    /// It sends the initial STORE request.
     ///
     async fn get_responsive_nodes_round(
         &self,
         nodes: Vec<NodeInfo>,
         file_id: Key,
-    ) -> Vec<Option<Response>> {
+    ) -> Vec<Response> {
         let responsive_nodes = nodes
             .into_iter()
             .map(|closest_node| self.send_initial_store_request(closest_node, file_id))
             .collect::<Vec<_>>();
 
-        // Run all lookups in parallel
-        join_all(responsive_nodes).await
+        // Run all lookups in parallel and remove those which did not respond.
+        join_all(responsive_nodes)
+            .await
+            .into_iter()
+            .filter_map(|res| res)
+            .collect::<Vec<Response>>()
     }
 
     ///
-    /// Send initial STORE request to a node
+    /// This method is a first step in the actual file upload process.
+    /// It sends a STORE request to a node and waits for a response.
+    ///
+    /// If the response is of type STORE_OK, the node is ready to
+    /// accept a data transfer. If the response is STORE_CHUNK_UPDATED
+    /// the receiving node does already have the same chunk stored.
+    /// In that case the receiving node does only update the TTL on
+    /// that chunk, but is not ready to receive a chunk.
     ///
     async fn send_initial_store_request(
         &self,
@@ -381,27 +370,35 @@ impl Node {
             node_info,
         );
 
-        // Just call the send_request_and_wait method, it will return err if the request fails
         match self
             .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
             .await
         {
+            // Ready to accept data
             Ok(response) if response.response_type == ResponseType::StoreOK => {
                 info!("Node '{}' is ready to accept data.", response.sender.id);
                 Some(response)
             }
+            // Updated storage, unable to accept
             Ok(response) if response.response_type == ResponseType::StoreChunkUpdated => {
                 info!("Node '{}' updated the data.", response.sender.id);
                 None
             }
+            // Timed out or unable to accept
             _ => None,
         }
     }
 
+    /// This method is a second step in the actual file upload process.
+    /// It sends a GET_PORT request to a node and waits for a response.
     ///
-    /// Send STORE PORT request
+    /// This request type is used to instruct the other node, that it has
+    /// been selected for data transfer, and it should start listening on
+    /// some port. The other node should expect a data transfer over TCP.
     ///
-    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Option<Response> {
+    /// The only accepted response is PORT_OK which means that the
+    /// receiving node did provide a port for TCP data transfer.
+    async fn send_get_port_request(&self, node_info: NodeInfo, key: Key) -> Option<Response> {
         let request = Request::new(
             RequestType::GetPort { file_id: key },
             self.to_node_info(),
@@ -423,7 +420,32 @@ impl Node {
     }
 
     ///
-    /// Send file over TCP
+    /// Method for actual data upload in parallel. This does
+    /// connect to all nodes, which previously responded with
+    /// ports, and does start an upload.
+    ///
+    async fn store_chunk(&self, ports: Vec<Response>, chunk: Chunk) -> Result<()> {
+        let established_connection = ports
+            .into_iter()
+            .map(|node_with_port| {
+                self.establish_tcp_stream_and_send_data(node_with_port.clone(), chunk.clone().data)
+            })
+            .collect::<Vec<_>>();
+
+        let sent_to_nodes = join_all(established_connection).await;
+
+        if sent_to_nodes.len() > 0 {
+            println!("Chunk successfully uploaded.");
+        } else {
+            // Future-improvement: Chunks which failed to upload to at least one node,
+            // might be sent again to a different set of nodes.
+            bail!("Chunk was not sent!");
+        }
+    }
+
+    ///
+    /// Method responsible for TCP data transfer.
+    /// It does connect to a provided TCP Stream and send data.
     ///
     async fn establish_tcp_stream_and_send_data(
         &self,
@@ -433,14 +455,9 @@ impl Node {
         if let (ResponseType::PortOK { port }) = response.response_type {
             let address =
                 response.sender.address.ip().to_string() + ":" + port.to_string().as_str();
-            let mut stream = TcpStream::connect(address)
-                .await
-                .expect("Unable to connect to the TCP Stream.");
+            let mut stream = TcpStream::connect(address).await?;
 
-            stream
-                .write_all(data.as_slice())
-                .await
-                .expect("Unable to write data.");
+            stream.write_all(data.as_slice()).await?;
 
             Ok(())
         } else {
