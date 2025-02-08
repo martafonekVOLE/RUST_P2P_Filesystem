@@ -9,9 +9,11 @@ use p2p::constants::K;
 use p2p::core::key::Key;
 use p2p::core::node::Node;
 use p2p::networking::node_info::NodeInfo;
+use p2p::sharding::common::FileMetadata;
 use p2p::utils::logging::init_logging;
-use public_ip;
 use std::io::BufRead;
+use std::path::Path;
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() {
@@ -42,7 +44,13 @@ async fn main() {
         .expect("Configuration error: node_port is missing or invalid.");
 
     // Create node
-    let mut node = Node::new(Key::new_random(), ip.to_string(), port, config.storage_path).await;
+    let node = match Node::new(Key::new_random(), ip.to_string(), port, config.storage_path).await {
+        Ok(node) => node,
+        Err(e) => {
+            error!("Failed to create node: {}", e);
+            return;
+        }
+    };
 
     // Begin listening for incoming network traffic
     node.start_listening();
@@ -66,7 +74,7 @@ async fn main() {
         match node.join_network(beacon_node_info).await {
             Ok(_) => {}
             Err(e) => {
-                warn!("Failed to join the network: {}", e);
+                error!("Failed to join the network: {}", e);
                 return;
             }
         }
@@ -80,6 +88,8 @@ async fn main() {
     println!("Available commands:");
     println!(" - ping <key>: Send a PING request to the specified node");
     println!(" - find_node <key>: Resolves {} closest nodes to <key>", K);
+    println!(" - store <filepath>: Upload a file to the network");
+    println!(" - find_value <file_handle> <storage_dir>: Download a file from the network");
     println!(" - dump_rt: Display the contents of the routing table");
     println!(
         "Note: <key> should be a {}-character hexadecimal string",
@@ -130,28 +140,38 @@ async fn main() {
             },
             "store" if parts.len() == 2 => {
                 let file_path = parts[1];
-                match node.store(file_path).await {
-                    Ok(()) => {
-                        println!("Successfully stored!");
+                let file_metadata = node.upload_file(file_path).await;
+                match file_metadata {
+                    Ok(file_metadata) => {
+                        println!("File uploaded successfully!");
+                        println!("File handle: {}", file_metadata);
                     }
                     Err(e) => {
-                        println!("Failed to store: {}", e);
+                        eprintln!("Failed to upload file: {}", e);
                     }
                 }
             }
-            "find_value" if parts.len() == 2 => match Key::from_hex_str(parts[1]) {
-                Ok(file_id) => match node.find_value(file_id).await {
-                    Ok(()) => {
-                        println!("Successfully stored!");
+            "find_value" if parts.len() == 3 => {
+                let file_handle = parts[1];
+                let storage_dir = Path::new(parts[2]);
+                match FileMetadata::from_str(file_handle) {
+                    Ok(file_metadata) => {
+                        let file = node.download_file(file_metadata, storage_dir).await;
+                        match file {
+                            Ok(file) => {
+                                println!("File downloaded successfully!");
+                                println!("File saved to: {:?}", file);
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to download file: {}", e);
+                            }
+                        }
                     }
                     Err(e) => {
-                        println!("Failed to store: {}", e);
+                        eprintln!("Invalid file handle: {}", e);
                     }
-                },
-                Err(e) => {
-                    eprintln!("Invalid node ID: {}", e);
                 }
-            },
+            }
             "dump_rt" if parts.len() == 1 => {
                 let all_contacts = node.get_routing_table_content().await;
                 println!("Routing table content:");
@@ -161,7 +181,7 @@ async fn main() {
             }
             _ => {
                 eprintln!(
-                    "Unknown command '{}', should be 'dump_rt', 'find_node <key>', 'ping <key>', 'store <filepath>'",
+                    "Wrong command or syntax '{}', should be 'dump_rt', 'find_node <key>', 'ping <key>', 'store <filepath>' or 'find_value <file_handle> <storage_dir>'",
                     parts[0]
                 );
             }

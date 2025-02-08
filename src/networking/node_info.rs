@@ -14,27 +14,9 @@ impl NodeInfo {
         NodeInfo { id, address }
     }
 
-    pub fn get_address(&self) -> &SocketAddr {
-        &self.address
-    }
-
     pub fn get_id(&self) -> Key {
         self.id
-    }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend(self.id.to_bytes());
-        bytes.extend(self.address.to_string().as_bytes());
-        bytes
-    }
-
-    pub fn create_local_node() -> Self {
-        let id = Key::new_random();
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("Failed to bind to address");
-        let address = socket.local_addr().expect("Failed to get local address");
-        NodeInfo { id, address }
-    }
+    } // TODO Change all usages to direct id access
 }
 
 impl Display for NodeInfo {

@@ -1,19 +1,19 @@
-use crate::constants::PING_TIMEOUT_MILLISECONDS;
 use crate::constants::{ALPHA, LOOKUP_TIMEOUT_MILLISECONDS};
+use crate::constants::{PING_TIMEOUT_MILLISECONDS, TCP_TIMEOUT_MILLISECONDS};
 use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
 use crate::core::lookup::{LookupBuffer, LookupResponse, LookupSuccessType};
 use crate::networking::message_dispatcher::MessageDispatcher;
-use crate::networking::messages::{Request, RequestType, Response, ResponseType};
+use crate::networking::messages::{Request, RequestType, Response, ResponseType, MAX_MESSAGE_SIZE};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
 use crate::routing::routing_table::RoutingTable;
-use crate::sharding::common::Chunk;
+use crate::sharding::common::{Chunk, FileMetadata};
 use crate::sharding::uploader::FileUploader;
 use crate::storage::file_manager::FileManager;
 use crate::storage::shard_storage_manager::ShardStorageManager;
 use futures::future::{join_all, ready};
-use log::{error, info};
+use log::{error, info, warn};
 use std::cmp::PartialEq;
 use std::fs;
 use std::net::SocketAddr;
@@ -26,13 +26,12 @@ use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 use crate::networking::tcp_listener::TcpListenerService;
-use futures::FutureExt;
+use crate::sharding::downloader::FileDownloader;
+use futures::{stream, FutureExt, StreamExt};
 use std::error::Error;
-
-const LOCALHOST: &str = "127.0.0.1:0";
 
 pub struct Node {
     pub key: Key,
@@ -46,26 +45,34 @@ pub struct Node {
 }
 
 impl Node {
-    pub async fn new(key: Key, ip: String, port: u16, storage_path: String) -> Self {
-        let address: SocketAddr = format!("{}:{}", ip, port).parse().expect("Invalid address");
+    pub async fn new(key: Key, ip: String, port: u16, storage_path: String) -> Result<Self> {
+        let address: SocketAddr = format!("{}:{}", ip, port)
+            .parse()
+            .with_context(|| format!("Parsing socket address from {}:{}", ip, port))?;
         let socket = TokioUdpSocket::bind(address)
             .await
-            .expect("Failed to bind socket");
+            .with_context(|| format!("Binding UDP socket to address {}", address))?;
         let resolved_address = socket
             .local_addr()
-            .expect("Failed to get local socket address");
-        Node {
+            .with_context(|| "Retrieving the local socket address after binding")?;
+        let message_dispatcher = Arc::new(
+            MessageDispatcher::new()
+                .await
+                .with_context(|| "Failed to create MessageDispatcher")?,
+        );
+
+        Ok(Node {
             key,
             address: resolved_address,
             socket: Arc::new(socket),
             routing_table: Arc::new(RwLock::new(RoutingTable::new(key))),
             request_map: RequestMap::new(),
-            message_dispatcher: Arc::new(MessageDispatcher::new().await),
+            message_dispatcher,
             file_manager: Arc::new(FileManager::new()),
             shard_storage_manager: Arc::new(RwLock::new(ShardStorageManager::new(PathBuf::from(
                 storage_path,
             )))),
-        }
+        })
     }
 
     ///
@@ -104,9 +111,10 @@ impl Node {
             .await;
 
         // Send message
-        if let Err(_send_err) = self.message_dispatcher.send_request(request).await {
-            bail!("Unable to send request via dispatcher.");
-        }
+        self.message_dispatcher
+            .send_request(request)
+            .await
+            .with_context(|| "Failed to send request via dispatcher")?;
 
         // Await the response from the channel, with given timeout.
         match timeout(Duration::from_millis(timeout_milliseconds), receiver).await {
@@ -131,7 +139,7 @@ impl Node {
         // Get the address from the RoutingTable
         let receiver_info = match self.routing_table.read().await.get_nodeinfo(&node_id)? {
             Some(info) => info.clone(),
-            None => bail!("PING failed. Node not in routing table."),
+            None => bail!("PING failed. Node {} not in routing table.", node_id),
         };
 
         let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
@@ -154,8 +162,7 @@ impl Node {
         }
 
         // Inject the initial resolvers into the result buffer
-        let mut lookup_buffer =
-            LookupBuffer::new(target.clone(), initial_resolvers, self.to_node_info());
+        let mut lookup_buffer = LookupBuffer::new(target, initial_resolvers, self.to_node_info());
 
         loop {
             // Get the resolvers for this
@@ -182,7 +189,7 @@ impl Node {
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
         for node_info in lookup_buffer.get_responsive_nodes() {
-            routing_table.store_nodeinfo(node_info);
+            routing_table.store_nodeinfo(node_info)?;
         }
 
         // Render the final result
@@ -192,11 +199,13 @@ impl Node {
     ///
     /// Method handling file uploads
     ///
-    pub async fn store(&self, file_path: &str) -> Result<()> {
+    pub async fn upload_file(&self, file_path: &str) -> Result<FileMetadata> {
         // Step 1: check file existence
-        let file_exists = fs::exists(file_path).expect("Unable to check file existence.");
-        if !file_exists {
-            return Err(anyhow!("Unable to open specified file. Check the path."));
+        if !Path::new(file_path).exists() {
+            bail!(
+                "Can't upload nonexistent file '{}'. Did you enter the correct path?",
+                file_path
+            );
         }
 
         // Step 2: call start sharding
@@ -211,15 +220,15 @@ impl Node {
                 Some(chunk) => {
                     // Step 4: get the ALPHA closest nodes responsible for the chunk
                     let responsible_nodes = self
-                        .get_closest_nodes_responsible_for_chunk(chunk.clone().hash)
+                        .get_alpha_closest_nodes_to_key(chunk.clone().hash)
                         .await?;
 
                     // Step 5: get ports for TCP data transfer
                     let mut ports = self
-                        .get_ports_for_nodes(responsible_nodes, chunk.clone().hash, true)
+                        .get_ports_for_nodes(responsible_nodes, chunk.clone().hash)
                         .await?;
 
-                    if ports.len() == 0 {
+                    if ports.is_empty() {
                         bail!("No port returned from nodes.");
                     }
 
@@ -234,13 +243,15 @@ impl Node {
                         })
                         .collect::<Vec<_>>();
 
+                    // vec <result <()>>
                     let sent_to_nodes = join_all(established_connection).await;
 
-                    if sent_to_nodes.len() > 0 {
-                        println!("Chunk successfully uploaded.");
+                    // Check if at least one result is Ok
+                    if sent_to_nodes.iter().any(|result| result.is_ok()) {
+                        info!("Chunk {} successfully uploaded.", chunk.hash);
                     } else {
                         // Future-improvement: Chunk may be sent again to different nodes.
-                        bail!("Chunk was not sent!");
+                        bail!("Chunk {} could not be sent!", chunk.hash);
                     }
                 }
                 None => {
@@ -252,27 +263,30 @@ impl Node {
         // Step 7: save info to FileManager
         self.file_manager.add_file_uploaded_entry(file_path).await;
 
-        Ok(())
+        // Get the file metadata and return it
+        uploader
+            .get_metadata()
+            .await
+            .with_context(|| "Failed to get metadata after successful upload")
     }
 
     ///
     /// Get ALPHA most responsive closest nodes for provided chunk.
     ///
-    async fn get_closest_nodes_responsible_for_chunk(
-        &self,
-        chunk_id: Key,
-    ) -> Result<Vec<Response>> {
+    async fn get_alpha_closest_nodes_to_key(&self, chunk_id: Key) -> Result<Vec<Response>> {
         let closest_nodes = self
-            .find_node(chunk_id.clone())
+            .find_node(chunk_id)
             .await
-            .expect("No closest nodes.");
+            .with_context(|| format!("Finding closest nodes for chunk {}", chunk_id))?;
 
-        // Responsive nodes which did respond to initial request with StoreOK
-        let mut responsive_nodes = self
-            .get_responsive_nodes_round(closest_nodes, chunk_id.clone())
-            .await;
+        let store_request_futures = closest_nodes
+            .into_iter()
+            .map(|closest_node| self.send_initial_store_request(closest_node, chunk_id))
+            .collect::<Vec<_>>();
 
-        if responsive_nodes.len() == 0 {
+        let mut responsive_nodes = join_all(store_request_futures).await;
+
+        if responsive_nodes.is_empty() {
             bail!("Unable to store file. No responsive nodes.");
         }
 
@@ -294,18 +308,28 @@ impl Node {
     /// This method returns a vector of nodes, which responded with PORT. That means
     /// that those are ready to accept a TCP data transfer.
     ///
-    async fn get_ports_for_nodes(
-        &self,
-        nodes: Vec<Response>,
-        key: Key,
-        is_store: bool,
-    ) -> Result<Vec<Response>> {
-        // Responsive nodes which did respond to initial request with StoreOK
-        let mut responsive_nodes = self
-            .request_available_ports_for_tcp_data_transfer(nodes, key)
-            .await;
+    async fn get_ports_for_nodes(&self, nodes: Vec<Response>, key: Key) -> Result<Vec<Response>> {
+        if nodes.is_empty() {
+            bail!("No nodes to send the request to.");
+        }
 
-        if responsive_nodes.len() == 0 {
+        if nodes.len() > ALPHA {
+            bail!(
+                "Too many nodes to send the request to - concurrency parameter ALPHA is {}",
+                ALPHA
+            );
+        }
+
+        // Prepare the futures for each node
+        let nodes_with_ports = nodes
+            .into_iter()
+            .map(|closest_node| self.send_store_port_request(closest_node.sender, key))
+            .collect::<Vec<_>>();
+
+        // Nodes that are ready to accept TCP data transfer
+        let mut responsive_nodes = join_all(nodes_with_ports).await;
+
+        if responsive_nodes.is_empty() {
             bail!("Unable to store file. No nodes are ready to accept TCP data transfer.");
         }
 
@@ -315,36 +339,27 @@ impl Node {
     }
 
     ///
-    /// Receive ports for TCP connection
+    /// Send STORE PORT request
     ///
-    async fn request_available_ports_for_tcp_data_transfer(
-        &self,
-        nodes: Vec<Response>,
-        key: Key,
-    ) -> Vec<Option<Response>> {
-        let nodes_with_ports = nodes
-            .into_iter()
-            .map(|closest_node| self.send_store_port_request(closest_node.sender, key))
-            .collect::<Vec<_>>();
+    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Option<Response> {
+        let request = Request::new(
+            RequestType::GetPort { chunk_id: key },
+            self.to_node_info(),
+            node_info,
+        );
 
-        join_all(nodes_with_ports).await
-    }
-
-    ///
-    ///
-    ///
-    async fn get_responsive_nodes_round(
-        &self,
-        nodes: Vec<NodeInfo>,
-        file_id: Key,
-    ) -> Vec<Option<Response>> {
-        let responsive_nodes = nodes
-            .into_iter()
-            .map(|closest_node| self.send_initial_store_request(closest_node, file_id))
-            .collect::<Vec<_>>();
-
-        // Run all lookups in parallel
-        join_all(responsive_nodes).await
+        match self
+            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+            .await
+        {
+            Ok(response) => {
+                if let ResponseType::PortOK { .. } = response.response_type {
+                    return Some(response);
+                };
+                None
+            }
+            _ => None,
+        }
     }
 
     ///
@@ -356,14 +371,14 @@ impl Node {
         file_id: Key,
     ) -> Option<Response> {
         let request = Request::new(
-            RequestType::Store { file_id },
+            RequestType::Store { chunk_id: file_id },
             self.to_node_info(),
             node_info,
         );
 
         // Just call the send_request_and_wait method, it will return err if the request fails
         match self
-            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS) // FIXME Specify timeout
             .await
         {
             Ok(response) if response.response_type == ResponseType::StoreOK => {
@@ -379,30 +394,6 @@ impl Node {
     }
 
     ///
-    /// Send STORE PORT request
-    ///
-    async fn send_store_port_request(&self, node_info: NodeInfo, key: Key) -> Option<Response> {
-        let request = Request::new(
-            RequestType::GetPort { file_id: key },
-            self.to_node_info(),
-            node_info,
-        );
-
-        match self
-            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
-            .await
-        {
-            Ok(response) => {
-                if let ResponseType::PortOK { port } = response.response_type {
-                    return Some(response);
-                };
-                None
-            }
-            _ => None,
-        }
-    }
-
-    ///
     /// Send file over TCP
     ///
     async fn establish_tcp_stream_and_send_data(
@@ -410,21 +401,28 @@ impl Node {
         response: Response,
         data: Vec<u8>,
     ) -> Result<()> {
-        if let (ResponseType::PortOK { port }) = response.response_type {
-            let address =
-                response.sender.address.ip().to_string() + ":" + port.to_string().as_str();
-            let mut stream = TcpStream::connect(address)
-                .await
-                .expect("Unable to connect to the TCP Stream.");
+        match response.response_type {
+            ResponseType::PortOK { .. } => {
+                let addr: SocketAddr = response.sender.address;
 
-            stream
-                .write_all(data.as_slice())
+                // Attempt to connect with a timeout
+                let mut stream = timeout(
+                    Duration::from_millis(TCP_TIMEOUT_MILLISECONDS),
+                    TcpStream::connect(addr),
+                )
                 .await
-                .expect("Unable to write data.");
+                .with_context(|| format!("Connection to {} timed out", addr))?
+                .with_context(|| format!("Failed to connect to {}", addr))?;
 
-            Ok(())
-        } else {
-            bail!("Unable to establish TCP stream.")
+                // Write the data to the stream.
+                stream
+                    .write_all(&data)
+                    .await
+                    .with_context(|| format!("Failed to send data to {}", addr))?;
+
+                Ok(())
+            }
+            _ => Err(anyhow!("Invalid response type: expected PortOK.")),
         }
     }
 
@@ -443,9 +441,11 @@ impl Node {
             .write()
             .await
             .store_nodeinfo(beacon_node.clone())
-            .expect("Failed to add beacon node to RT");
+            .with_context(|| format!("Storing beacon node {} in routing table", beacon_node.id))?;
 
-        self.ping(beacon_node.id).await?;
+        self.ping(beacon_node.id)
+            .await
+            .context("Beacon node unavailable.")?;
 
         // Send single find_node to the beacon to get the initial k-closest nodes
         let mut initial_k_closest = self
@@ -506,6 +506,7 @@ impl Node {
     ///
     /// Perform a single lookup to the given resolver node.
     /// This can be called individually, or used by lookup_round for parallel calls.
+    /// The type of resolution (Node/Value) is determined by the for_value parameter.
     ///
     pub async fn single_lookup(
         &self,
@@ -531,11 +532,11 @@ impl Node {
         {
             // We received a response
             Ok(response) => {
-                if let ResponseType::Nodes { nodes } = response.response_type {
+                if let ResponseType::Nodes { node_infos: nodes } = response.response_type {
                     LookupResponse::new_nodes_successful(resolver_node_info, nodes)
                 }
                 // Decide if the response is valid based on the context
-                else if let ResponseType::HasValue { chunk_id } = response.response_type {
+                else if let ResponseType::HasValue { .. } = response.response_type {
                     return match for_value {
                         true => LookupResponse::new_value_successful(resolver_node_info),
                         false => LookupResponse::new_failed(resolver_node_info),
@@ -558,6 +559,8 @@ impl Node {
     /// - If resolvers is empty, returns an empty Vec.
     /// - Otherwise, spawns tasks for each resolver using `single_lookup`.
     ///
+    /// The type of resolution (Node/Value) is determined by the for_value parameter.
+    ///
     pub async fn lookup_round(
         &self,
         target: Key,
@@ -572,7 +575,7 @@ impl Node {
         let tasks = resolvers
             .into_iter()
             .map(|resolver_node_info| {
-                let t_clone = target.clone();
+                let t_clone = target;
                 self.single_lookup(t_clone, resolver_node_info, for_value)
             })
             .collect::<Vec<_>>();
@@ -597,11 +600,13 @@ impl Node {
 
         // Spawn an indefinitely looping async task to listen for incoming messages
         task::spawn(async move {
-            let mut buffer = [0; 1024]; // FIXME: Magic number
+            let mut buffer = [0; MAX_MESSAGE_SIZE];
             loop {
                 match socket.recv_from(&mut buffer).await {
                     Ok((size, src)) => {
+                        //bp here
                         let data = &buffer[..size];
+
                         // Response
                         if let Ok(response) = serde_json::from_slice::<Response>(data) {
                             let request_map = request_map.clone();
@@ -610,6 +615,7 @@ impl Node {
                                 // Unknown requests IDs are filtered out by this method
                                 request_map.handle_response(response).await;
                             });
+
                         // Request
                         } else if let Ok(request) = serde_json::from_slice::<Request>(data) {
                             let routing_table = Arc::clone(&routing_table);
@@ -626,58 +632,117 @@ impl Node {
                                 )
                                 .await;
                             });
+
                         // Invalid incoming message
                         } else {
-                            eprintln!("Failed to parse message from {}", src);
+                            error!("Failed to parse message from {}", src);
                         }
                     }
                     // Reading from the socket failed
                     Err(e) => {
-                        eprintln!("Error receiving message: {}", e);
+                        // bp here
+                        error!("Error receiving message: {}", e);
                     }
                 }
             }
         });
     }
 
-    ///
-    ///
-    ///
-    pub async fn find_value(&self, target: Key) -> Result<()> {
-        // Do metadata magic which does retrieve chunks
-        let chunks: Vec<Key> = Vec::new();
+    pub async fn download_file(
+        &self,
+        file_metadata: FileMetadata,
+        output_dir: &Path,
+    ) -> Result<()> {
+        // Extract the list of chunk keys from the file metadata.
+        let chunk_keys: Vec<Key> = file_metadata
+            .chunks_metadata
+            .iter()
+            .map(|chunk| chunk.hash)
+            .collect();
 
-        let possible_data = self.get_chunks_values(chunks).await;
+        // Resolve the nodes responsible for the given chunk keys.
+        let resolved_pairs = self.find_storers_parallel(chunk_keys).await?;
+        info!("File {} is downloadable", file_metadata.name);
 
-        // Check if all data were received completely
+        // Init file downloader
+        let mut file_downloader = FileDownloader::new(file_metadata, output_dir).await?;
 
-        // Assemble file
+        for (i, (chunk_id, chunk_storer)) in resolved_pairs.into_iter().enumerate() {
+            // Download the chunk from the storer
+            let chunk_data = self
+                .download_chunk_from_storer(chunk_id, chunk_storer)
+                .await?;
+            info!(
+                "Chunk {} downloaded (number {} from {})",
+                chunk_id,
+                i + 1,
+                chunk_data.len()
+            );
+            // Store the chunk in the file.
+            file_downloader
+                .store_next_chunk(Chunk {
+                    hash: chunk_id,
+                    data: chunk_data,
+                })
+                .await?;
+            info!("Chunk {} stored", chunk_id);
+        }
 
         Ok(())
     }
 
     ///
+    /// This method resolves nodes responsible for the given chunk keys.
+    /// The output can be used to download the chunks from the network.
     ///
-    ///
-    pub async fn get_chunks_values(&self, chunks: Vec<Key>) -> Vec<Result<Vec<u8>>> {
-        let tasks = chunks
-            .into_iter()
-            .map(|chunk_key| {
-                // Do magic with the chunk (decrypt)
+    pub async fn find_storers_parallel(
+        &self,
+        chunk_keys: Vec<Key>,
+    ) -> Result<Vec<(Key, NodeInfo)>> {
+        let mut resolved_pairs = Vec::with_capacity(chunk_keys.len());
 
-                self.get_value(chunk_key)
-            })
-            .collect::<Vec<_>>();
+        // Process the chunk keys in batches of at most ALPHA.
+        for batch in chunk_keys.chunks(ALPHA) {
+            let batch_futures = batch.iter().map(|chunk_key| {
+                let key = *chunk_key;
+                async move {
+                    // Resolve the storer for the given chunk key.
+                    // If find_value() fails, this future will return an error.
+                    let storer = self.find_storer(key).await?;
+                    Ok::<(Key, NodeInfo), anyhow::Error>((key, storer))
+                }
+            });
 
-        // Run all lookups in parallel
-        join_all(tasks).await
+            // Execute all futures in the batch concurrently.
+            let batch_results = join_all(batch_futures).await;
+
+            // Verify success or propagate error
+            for res in batch_results {
+                let pair = res?;
+                resolved_pairs.push(pair);
+            }
+        }
+
+        Ok(resolved_pairs)
     }
 
     ///
+    /// Finds the first node in the network that is physically storing the chunk with the given key.
+    /// If the chunk is not found, an error is returned.
     ///
-    ///
-    pub async fn get_value(&self, target: Key) -> Result<Vec<u8>> {
-        // FIRST STEP: Try to find value locally
+    pub async fn find_storer(&self, target: Key) -> Result<NodeInfo> {
+        // First step: Try to find _chunk locally
+        if self
+            .shard_storage_manager
+            .read()
+            .await
+            .read_chunk(&target)
+            .await
+            .is_ok()
+        // Ok is returned when the chunk is found on this node
+        {
+            return Ok(self.to_node_info());
+        }
 
         // Initial resolvers are the alpha closest nodes to the target in our RT
         let initial_resolvers = self.routing_table.read().await.get_alpha_closest(&target)?;
@@ -686,8 +751,7 @@ impl Node {
         }
 
         // Inject the initial resolvers into the result buffer
-        let mut lookup_buffer =
-            LookupBuffer::new(target.clone(), initial_resolvers, self.to_node_info());
+        let mut lookup_buffer = LookupBuffer::new(target, initial_resolvers, self.to_node_info());
 
         let mut current_responses = Vec::new();
 
@@ -705,79 +769,61 @@ impl Node {
             if !lookup_buffer.record_lookup_round_responses(current_responses.clone(), true) {
                 break;
             }
+
+            // FIXME this doesn't exhaust all K closest nodes to the value (see find_node)
         }
 
-        if let Some(lookup_response) = self.has_response_with_value(current_responses) {
-            let key_owner = lookup_response.get_resolver();
-            let data = self.get_chunk_data_from_node(target, key_owner).await?;
-            return Ok(data);
+        // Check if we found the _chunk storer
+        if let Some(lookup_response) = current_responses
+            .into_iter()
+            .find(|response| matches!(response.get_success_type(), Some(LookupSuccessType::Value)))
+        {
+            let storer = lookup_response.get_resolver();
+            info!("Found a node which stores chunk {}: {}", target, storer.id);
+            return Ok(storer);
         }
 
-        Err("Unable to receive data").expect("Unable to receive data")
+        bail!("Failed to find storer for chunk {}.", target);
     }
 
     ///
+    /// Downloads a chunk from the storer node. This method expects the chunk to be available
+    /// on the storer node and will return an error if the chunk is not found.
     ///
-    ///
-    fn has_response_with_value(&self, responses: Vec<LookupResponse>) -> Option<LookupResponse> {
-        for response in responses {
-            if let Some(success_type) = response.get_success_type() {
-                match success_type {
-                    LookupSuccessType::Value => {
-                        return Some(response);
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        None
-    }
-
-    ///
-    ///
-    ///
-    async fn get_chunk_data_from_node(
+    async fn download_chunk_from_storer(
         &self,
         chunk_id: Key,
-        chunk_owner: NodeInfo,
+        chunk_storer: NodeInfo,
     ) -> Result<Vec<u8>> {
         // Open a TCP Listener
-        let tcp_listener_service = match TcpListenerService::new().await {
-            Ok(listener) => listener,
-            Err(E) => bail!(E),
-        };
+        let tcp_listener_service = TcpListenerService::new()
+            .await
+            .with_context(|| "Failed to create TCP listener service for downloading chunk")?;
 
         // Send download request
-        self.send_chunk_download_request(chunk_owner, chunk_id, tcp_listener_service.get_port())
-            .await?;
+        let request = Request::new(
+            RequestType::GetValue {
+                chunk_id,
+                port: tcp_listener_service.get_port(),
+            },
+            self.to_node_info(),
+            chunk_storer.clone(),
+        );
+
+        self.message_dispatcher
+            .send_request(request)
+            .await
+            .with_context(|| {
+                format!(
+                    "Sending download request for chunk {} to {}",
+                    chunk_id, chunk_storer
+                )
+            })?;
 
         // Receive data over TCP
         let data = tcp_listener_service.receive_data().await?;
 
         Ok(data)
-    }
-
-    ///
-    ///
-    ///
-    async fn send_chunk_download_request(
-        &self,
-        receiver: NodeInfo,
-        chunk_id: Key,
-        port: u16,
-    ) -> Result<()> {
-        let request = Request::new(
-            RequestType::GetValue { chunk_id, port },
-            self.to_node_info(),
-            receiver,
-        );
-
-        if let Err(_send_err) = self.message_dispatcher.send_request(request).await {
-            bail!("Unable to send request via dispatcher.");
-        }
-
-        Ok(())
     }
 }
 
@@ -788,9 +834,9 @@ mod tests {
     use tokio::net::UdpSocket;
 
     #[tokio::test]
-    async fn test_ping_response() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_ping_response() -> Result<(), Box<dyn Error>> {
         let key = Key::new_random();
-        let node = Node::new(key.clone(), "127.0.0.1".to_string(), 8081, "/".to_string()).await;
+        let node = Node::new(key, "127.0.0.1".to_string(), 8081, "/".to_string()).await?;
         let node_address = node.address;
 
         // Start the listener so the node can receive requests.
@@ -808,8 +854,11 @@ mod tests {
         );
 
         // Send the Ping request to the node socket.
+        let ping_request_bytes = serde_json::to_vec(&ping_request)
+            .with_context(|| "Failed to serialize ping request")?;
+
         ephemeral_socket
-            .send_to(&ping_request.to_bytes(), node_address)
+            .send_to(&ping_request_bytes, node_address)
             .await?;
 
         // Wait for the nodes Pong response.
