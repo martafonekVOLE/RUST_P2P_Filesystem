@@ -676,7 +676,7 @@ impl Node {
                 .download_chunk_from_storer(chunk_id, chunk_storer)
                 .await?;
             info!(
-                "Chunk n.1 {} downloaded (number {} from {})",
+                "Chunk n.{} downloaded (number {} from {})",
                 chunk_id,
                 i + 1,
                 chunk_data.len()
@@ -798,6 +798,17 @@ impl Node {
         chunk_id: Key,
         chunk_storer: NodeInfo,
     ) -> Result<Vec<u8>> {
+        // If we are the storer, we can read the chunk directly from the storage
+        if chunk_storer.id == self.key {
+            return self
+                .shard_storage_manager
+                .read()
+                .await
+                .read_chunk(&chunk_id)
+                .await
+                .with_context(|| format!("Failed to read chunk {} from local storage", chunk_id));
+        }
+
         // Open a TCP Listener
         let tcp_listener_service = TcpListenerService::new()
             .await
