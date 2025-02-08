@@ -73,32 +73,48 @@ impl FileUploader {
     //     }
     // }
 
-    pub async fn get_next_chunk(&mut self) -> Result<Option<Chunk>, ShardingError> {
+    pub async fn get_next_chunk_encrypt(&mut self) -> Result<Option<Chunk>, ShardingError> {
         let file = &mut self.file_reader;
-        let mut buffer = vec![0; CHUNK_READ_KB_LARGE];
-        let bytes_read = file.read(&mut buffer).await?;
+        let padded_size = CHUNK_READ_KB * 1024;
+        let mut byte_data_buffer = vec![0; padded_size];
+        let bytes_read = file.read(&mut byte_data_buffer).await?;
         if bytes_read == 0 {
             return Ok(None);
         }
-        buffer.truncate(bytes_read);
+        byte_data_buffer.truncate(bytes_read);
 
-        if bytes_read < CHUNK_READ_KB_LARGE {
+        if bytes_read < padded_size {
             // Add padding with random bytes
             let mut rng = rand::thread_rng();
-            let random_bytes: Vec<u8> = (0..CHUNK_READ_KB_LARGE - bytes_read)
+            let random_bytes: Vec<u8> = (0..padded_size - bytes_read)
                 .map(|_| rng.random())
                 .collect();
-            buffer.extend(&random_bytes);
+            byte_data_buffer.extend(&random_bytes);
         }
-        assert_eq!(buffer.len(), CHUNK_READ_KB_LARGE);
+        assert_eq!(byte_data_buffer.len(), padded_size);
 
-        let (nonce, encrypted_chunk) = encryption::encrypt_payload(&buffer, &self.encryption_key)
-            .map_err(|e| ShardingError::EncryptionFailed)?;
+        let bytes_read_u32: u32 = bytes_read as u32;
+
+        let unpadded_size_bytes = bytes_read_u32.to_le_bytes();
+        assert_eq!(unpadded_size_bytes.len(), 4);
+
+        // let chunk_data = DecryptedChunkData {
+        //     data_padded: byte_data_buffer,
+        //     data_unpadded_size: bytes_read as u32,
+        // };
+
+        //let data_bytes = bincode::serialize(&chunk_data).unwrap();
+
+        let chunk_hash = Hash::from_input(&byte_data_buffer);
+        byte_data_buffer.extend_from_slice(&unpadded_size_bytes);
+
+        let (nonce, encrypted_chunk) =
+            encryption::encrypt_payload(&byte_data_buffer, &self.encryption_key)
+                .map_err(|e| ShardingError::EncryptionFailed)?;
 
         let chunk = Chunk {
             data: encrypted_chunk.to_vec(),
-            hash: Hash::from_input(&buffer), // Hash of unencrypted chunk
-            decrypted_data_unpadded_size: bytes_read, // Store real length in chunk
+            hash: chunk_hash, // Hash of unencrypted chunk
         };
 
         self.file_metadata.chunks_metadata.push(ChunkMetadata {
@@ -164,15 +180,15 @@ mod tests {
         let mut uploader = FileUploader::new(file_path.to_str().unwrap())
             .await
             .unwrap();
-        let chunk = uploader.get_next_chunk().await.unwrap();
+        let chunk = uploader.get_next_chunk_encrypt().await.unwrap();
         assert!(chunk.is_some(), "Expected Some(chunk), got None");
         assert_eq!(
             chunk.unwrap().data.len(),
-            file_size + encryption::AES_GCM_AUTH_TAG_SIZE,
+            CHUNK_SIZE_B,
             "Chunk length mismatch"
         );
 
-        let chunk = uploader.get_next_chunk().await.unwrap();
+        let chunk = uploader.get_next_chunk_encrypt().await.unwrap();
         assert!(chunk.is_none(), "Expected None");
     }
 
@@ -182,7 +198,7 @@ mod tests {
         let mut uploader = FileUploader::new(file_path.to_str().unwrap())
             .await
             .unwrap();
-        let chunk = uploader.get_next_chunk().await.unwrap();
+        let chunk = uploader.get_next_chunk_encrypt().await.unwrap();
         assert!(chunk.is_some(), "Expected Some(chunk), got None");
         let metadata = uploader.get_metadata().await;
         assert!(

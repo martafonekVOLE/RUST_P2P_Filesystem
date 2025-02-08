@@ -15,6 +15,7 @@ use p2p::utils::logging::init_logging;
 use std::io::BufRead;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {

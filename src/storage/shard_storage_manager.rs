@@ -1,7 +1,7 @@
 use crate::core::key::Key as Hash;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
-use crate::sharding::common::{Chunk, CHUNK_READ_KB_LARGE, CHUNK_SIZE_KB_LARGE};
+use crate::sharding::common::{Chunk, CHUNK_READ_KB, CHUNK_SIZE_B};
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
 use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
@@ -61,7 +61,7 @@ impl ShardStorageManager {
                 }
                 let chunk_size = data.len();
 
-                if chunk_size > CHUNK_SIZE_KB_LARGE * 1024 {
+                if chunk_size > CHUNK_SIZE_B {
                     bail!("Invalid chunk size");
                 }
                 if MAX_DATA_STORED_MB * 1024 - self.total_stored_kb < chunk_size {
@@ -200,9 +200,8 @@ mod tests {
 
     fn create_test_chunk() -> Chunk {
         Chunk {
-            data: vec![0; CHUNK_SIZE_KB_LARGE],
+            data: vec![0; CHUNK_SIZE_B],
             hash: Hash::new_random(),
-            decrypted_data_unpadded_size: CHUNK_READ_KB_LARGE,
         }
     }
 
