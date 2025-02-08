@@ -186,6 +186,10 @@ impl ShardStorageManager {
             .cloned()
             .collect()
     }
+
+    pub fn get_owned_chunk_keys(&self) -> Vec<Hash> {
+        self.owned_chunks.keys().cloned().collect()
+    }
 }
 
 #[cfg(test)]

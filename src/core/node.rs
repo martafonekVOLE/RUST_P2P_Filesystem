@@ -7,7 +7,7 @@ use crate::networking::message_dispatcher::MessageDispatcher;
 use crate::networking::messages::{Request, RequestType, Response, ResponseType, MAX_MESSAGE_SIZE};
 use crate::networking::node_info::NodeInfo;
 use crate::networking::request_map::RequestMap;
-use crate::routing::routing_table::RoutingTable;
+use crate::routing::routing_table::{RoutingTable, RoutingTableError};
 use crate::sharding::common::{Chunk, FileMetadata};
 use crate::sharding::uploader::FileUploader;
 use crate::storage::file_manager::FileManager;
@@ -32,6 +32,22 @@ use crate::networking::tcp_listener::TcpListenerService;
 use crate::sharding::downloader::FileDownloader;
 use futures::{stream, FutureExt, StreamExt};
 use std::error::Error;
+
+use thiserror::Error;
+
+#[derive(Error, Debug, PartialEq)]
+pub enum NodeError {
+    #[error("No response received on the channel")]
+    BadResponse,
+    #[error("Timed out awaiting response")]
+    ResponseTimeout,
+    #[error("Unable to send request via dispatcher")]
+    UnableToSend,
+    #[error("PING failed. Node not in routing table")]
+    PingMissingNode,
+    #[error("Routing table failed")]
+    RoutingTableFailed(#[from] RoutingTableError),
+}
 
 pub struct Node {
     pub key: Key,
@@ -124,7 +140,7 @@ impl Node {
         self.message_dispatcher
             .send_request(request)
             .await
-            .with_context(|| "Failed to send request via dispatcher")?;
+            .map_err(|_| NodeError::UnableToSend)?;
 
         // Await the response from the channel, with given timeout.
         match timeout(Duration::from_millis(timeout_milliseconds), receiver).await {
@@ -150,7 +166,9 @@ impl Node {
         // Get the address from the RoutingTable
         let receiver_info = match self.routing_table.read().await.get_nodeinfo(&node_id)? {
             Some(info) => info.clone(),
-            None => bail!("PING failed. Node {} not in routing table.", node_id),
+            None => {
+                return Err(NodeError::PingMissingNode);
+            }
         };
 
         let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
@@ -448,8 +466,8 @@ impl Node {
         self.routing_table
             .write()
             .await
-            .store_nodeinfo(beacon_node.clone())
-            .with_context(|| format!("Storing beacon node {} in routing table", beacon_node.id))?;
+            .store_nodeinfo(beacon_node.clone(), &self)
+            .await?;
 
         self.ping(beacon_node.id)
             .await
@@ -690,6 +708,9 @@ impl Node {
             );
             // Store the chunk in the file.
             file_downloader
+                // FIXME Chunk offset must be stored inside the encrypted payload.
+                // FIXME This method must take chunk_id and chunk_data (encrypted data) only and
+                // FIXME get the offset from the encrypted payload.
                 .store_next_chunk(Chunk {
                     hash: chunk_id,
                     data: chunk_data,

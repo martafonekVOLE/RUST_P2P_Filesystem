@@ -145,6 +145,7 @@ async fn main() {
     println!(" - store <filepath>: Upload a file to the network");
     println!(" - find_value <file_handle> <storage_dir>: Download a file from the network");
     println!(" - dump_rt: Display the contents of the routing table");
+    println!(" - dump_chunks: Display the chunks owned by this node");
     println!(
         "Note: <key> should be a {}-character hexadecimal string",
         K * 2
@@ -242,7 +243,7 @@ async fn main() {
             }
             _ => {
                 eprintln!(
-                    "Wrong command or syntax '{}', should be 'dump_rt', 'find_node <key>', 'ping <key>', 'store <filepath>' or 'find_value <file_handle> <storage_dir>'",
+                    "Wrong command or syntax '{}', should be 'dump_rt', 'find_node <key>', 'ping <key>', 'store <filepath>', 'find_value <file_handle> <storage_dir>' or 'dump_chunks'",
                     parts[0]
                 );
             }
