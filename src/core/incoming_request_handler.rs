@@ -18,11 +18,13 @@ use tokio::sync::RwLock;
 use tokio::time::timeout;
 
 const LOCALHOST: &str = "127.0.0.1:0";
+use super::node::Node;
 
 ///
 /// Handles incoming requests.
 ///
 pub async fn handle_received_request(
+    this_node: Arc<Node>,
     this_node_info: NodeInfo,
     request: Request,
     routing_table: Arc<RwLock<RoutingTable>>,
@@ -40,7 +42,7 @@ pub async fn handle_received_request(
     }
 
     // Update routing table with the sender's info.
-    record_possible_neighbour(routing_table.clone(), &request.sender).await;
+    record_possible_neighbour(this_node, routing_table.clone(), &request.sender).await;
 
     match request.request_type {
         RequestType::Ping => {
@@ -326,10 +328,17 @@ async fn handle_tcp_upload(
 ///
 /// Updates the routing table with the given node's information.
 ///
-async fn record_possible_neighbour(routing_table: Arc<RwLock<RoutingTable>>, node: &NodeInfo) {
+async fn record_possible_neighbour(
+    this_node: Arc<Node>,
+    routing_table: Arc<RwLock<RoutingTable>>,
+    node: &NodeInfo,
+) {
     let mut routing_table = routing_table.write().await;
     // routing_table.store_nodeinfo(node.clone()).unwrap();
-    match routing_table.store_nodeinfo(node.clone()) {
+    match routing_table
+        .store_nodeinfo(node.clone(), this_node.as_ref())
+        .await
+    {
         Ok(_) => {}
         Err(e) => {
             error!("Failed to store node info: {}", e);

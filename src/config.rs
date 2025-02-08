@@ -1,10 +1,10 @@
 use crate::core::key::Key;
 use get_if_addrs::get_if_addrs;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Clone)]
 pub enum IpAddressType {
     Public,
     Local,
@@ -27,7 +27,7 @@ impl<'de> Deserialize<'de> for IpAddressType {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        match s.as_str() {
+        match s.to_lowercase().as_str() {
             "public" => Ok(IpAddressType::Public),
             "local" => Ok(IpAddressType::Local),
             "loopback" => Ok(IpAddressType::Loopback),
@@ -36,7 +36,7 @@ impl<'de> Deserialize<'de> for IpAddressType {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub beacon_node_address: Option<SocketAddr>,
     pub beacon_node_key: Option<Key>,
@@ -63,9 +63,6 @@ impl Config {
 
         // Validate paths
         config.validate_storage_path(&config.storage_path)?;
-        if let Some(cache_file_path) = &config.cache_file_path {
-            config.validate_cache_file_path(cache_file_path)?;
-        }
 
         // If skip_join is false, these must be present:
         if !skip_join {
@@ -97,19 +94,6 @@ impl Config {
             return Err(format!("Storage path is not a directory: {}", path.display()).into());
         }
         Ok(())
-    }
-
-    fn validate_cache_file_path(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let path = std::path::Path::new(path);
-        if path.exists() {
-            if path.is_file() {
-                Ok(())
-            } else {
-                Err(format!("Cache path is not a file: {}", path.display()).into())
-            }
-        } else {
-            Err(format!("Cache file does not exist: {}", path.display()).into())
-        }
     }
 
     pub async fn resolve_ip_address(&self) -> Result<IpAddr, Box<dyn std::error::Error>> {

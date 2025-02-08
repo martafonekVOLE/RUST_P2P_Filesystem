@@ -10,14 +10,15 @@ use thiserror::Error;
 // Actual size of the chunk will be 16 bytes longer
 // because of auth tag on encyrpted message.
 // These constants just represent how much will be read from file to fill the chunk
-pub const CHUNK_READ_KB_SMALL: usize = 512; // KB
+//pub const CHUNK_READ_KB_SMALL: usize = 512; // KB
 pub const CHUNK_READ_KB_LARGE: usize = 1024; // KB
 
-pub const CHUNK_SIZE_KB_SMALL: usize = CHUNK_READ_KB_SMALL + AES_GCM_AUTH_TAG_SIZE; // KB
+//pub const CHUNK_SIZE_KB_SMALL: usize = CHUNK_READ_KB_SMALL + AES_GCM_AUTH_TAG_SIZE; // KB
 pub const CHUNK_SIZE_KB_LARGE: usize = CHUNK_READ_KB_LARGE + AES_GCM_AUTH_TAG_SIZE; // KB
 
 pub const MAX_FILE_SIZE_MB: usize = 4096; // 4 GB
-pub const LARGE_FILE_THRESHOLD_MB: usize = 1024; // 1 GB
+
+//pub const LARGE_FILE_THRESHOLD_MB: usize = 1024; // 1 GB
 
 #[derive(Error, Debug)]
 pub enum ShardingError {
@@ -40,13 +41,13 @@ pub enum ShardingError {
 #[derive(Clone)]
 pub struct Chunk {
     pub data: Vec<u8>,
-    pub hash: Hash, // TODO: maybe don't need to pass to external modules,
-                    // because no need to verify it, AEAD auth tag already ensures integrity
+    pub hash: Hash,                          // Hash of padded unencrypted chunk
+    pub decrypted_data_unpadded_size: usize, // Real size of decrypted without possible padding
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChunkMetadata {
-    pub hash: Hash,
+    pub hash: Hash,     // Hash of padded unencrypted chunk
     pub nonce: Vec<u8>, // Is required to decrypt the message. 12-byte long unique value.
 }
 
