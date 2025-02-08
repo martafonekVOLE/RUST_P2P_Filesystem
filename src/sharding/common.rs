@@ -1,4 +1,4 @@
-use super::encryption::AES_GCM_AUTH_TAG_SIZE;
+use super::encryption::AES_GCM_AUTH_TAG_SIZE_B;
 use crate::core::key::Key as Hash;
 use anyhow::{Context, Result};
 use fmt::{Display, Formatter};
@@ -8,14 +8,15 @@ use std::io::{self};
 use std::str::FromStr;
 use thiserror::Error;
 
-// Actual size of the chunk will be 16 bytes longer
-// because of auth tag on encyrpted message.
+// Actual size of the chunk will be longer
+// because of auth tag etc. on encyrpted message.
 // These constants just represent how much will be read from file to fill the chunk
 //pub const CHUNK_READ_KB_SMALL: usize = 512; // KB
-pub const CHUNK_READ_KB_LARGE: usize = 1024; // KB
+pub const CHUNK_READ_KB: usize = 1024; // KB
 
 //pub const CHUNK_SIZE_KB_SMALL: usize = CHUNK_READ_KB_SMALL + AES_GCM_AUTH_TAG_SIZE; // KB
-pub const CHUNK_SIZE_KB_LARGE: usize = CHUNK_READ_KB_LARGE + AES_GCM_AUTH_TAG_SIZE; // KB
+/// CHUNK_READ_KB * 1024 + 4 + AES_GCM_AUTH_TAG_SIZE_B
+pub const CHUNK_SIZE_B: usize = CHUNK_READ_KB * 1024 + 4 + AES_GCM_AUTH_TAG_SIZE_B; // BYTES
 
 pub const MAX_FILE_SIZE_MB: usize = 4096; // 4 GB
 
@@ -39,11 +40,18 @@ pub enum ShardingError {
     ChunkHashMismatch,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct DecryptedChunkData {
+    pub data_padded: Vec<u8>,
+    pub data_unpadded_size: u32,
+}
+
+/// Encrypted or decrypted chunk
 #[derive(Clone)]
 pub struct Chunk {
-    pub data: Vec<u8>,
-    pub hash: Hash,                          // Hash of padded unencrypted chunk
-    pub decrypted_data_unpadded_size: usize, // Real size of decrypted without possible padding
+    pub data: Vec<u8>, // Size of chunk data is also stored here
+    pub hash: Hash,    // Hash of padded unencrypted chunk
+                       //pub decrypted_data_unpadded_size: usize, // Real size of decrypted without possible padding
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

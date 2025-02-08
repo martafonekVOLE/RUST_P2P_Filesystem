@@ -4,8 +4,8 @@ use crate::networking::node_info::NodeInfo;
 use log::error;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use std::net::SocketAddr;
 use thiserror::Error;
-use tokio::net::unix::SocketAddr;
 use uuid::Uuid;
 
 // NodeInfo consists of a Key (which is K bytes) plus the size of the SocketAddr.

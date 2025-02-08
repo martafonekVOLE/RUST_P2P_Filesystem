@@ -247,7 +247,7 @@ impl Node {
         // Step 3: loop over shards
         loop {
             // Step 3.1: get next shard
-            let chunk = uploader.get_next_chunk().await?;
+            let chunk = uploader.get_next_chunk_encrypt().await?;
 
             match chunk {
                 Some(chunk) => {
@@ -711,7 +711,7 @@ impl Node {
                 // FIXME Chunk offset must be stored inside the encrypted payload.
                 // FIXME This method must take chunk_id and chunk_data (encrypted data) only and
                 // FIXME get the offset from the encrypted payload.
-                .store_next_chunk(Chunk {
+                .store_next_chunk_decrypt(Chunk {
                     hash: chunk_id,
                     data: chunk_data,
                 })
@@ -878,7 +878,7 @@ mod tests {
     #[tokio::test]
     async fn test_ping_response() -> Result<(), Box<dyn Error>> {
         let key = Key::new_random();
-        let node = Node::new(key, "127.0.0.1".to_string(), 8081, "/".to_string()).await?;
+        let node = Arc::new(Node::new(key, "127.0.0.1".to_string(), 8081, "/".to_string()).await?);
         let node_address = node.address;
 
         let node_clone = Arc::clone(&node);

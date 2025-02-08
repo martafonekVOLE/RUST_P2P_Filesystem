@@ -6,8 +6,8 @@ use aes_gcm::{
 use anyhow::{Context, Result};
 
 pub const AES_GCM_NONCE_SIZE: usize = 12; // bytes
-pub const AES_GCM_AUTH_TAG_SIZE: usize = 16; // auth tag appended at end of encrypted payload
-                                             // ensures integrity and authenticity
+pub const AES_GCM_AUTH_TAG_SIZE_B: usize = 16; // auth tag appended at end of encrypted payload
+                                               // ensures integrity and authenticity
 
 /// Encrypts data using AES-GCM
 pub fn encrypt_payload(payload: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -61,7 +61,7 @@ mod tests {
         let payload = b"Test payload";
 
         let (nonce, ciphertext) = encrypt_payload(payload, &key).expect("Encryption failed");
-        assert_eq!(ciphertext.len(), payload.len() + AES_GCM_AUTH_TAG_SIZE);
+        assert_eq!(ciphertext.len(), payload.len() + AES_GCM_AUTH_TAG_SIZE_B);
         assert_ne!(ciphertext, payload); // Ensure payload is encrypted
 
         let decrypted_payload =
