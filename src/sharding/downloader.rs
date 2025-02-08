@@ -1,23 +1,15 @@
-use crate::core::key::Key as Hash;
-use rand::Rng;
-use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::{self, BufReader};
-use std::path::Path;
-use thiserror::Error;
+use std::path::{Path, PathBuf};
 use tokio::fs::File as TokioFile;
-use tokio::io::{
-    AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader as TokioBufReader,
-    BufWriter as TokioBufWriter,
-};
+use tokio::io::{AsyncWriteExt, BufWriter as TokioBufWriter};
 
 use super::common::*;
-use super::encryption; //::{ecrypt_payloaddecrypt_payload};
-use super::uploader::FileUploader;
+use super::encryption;
+
 pub struct FileDownloader {
     file_writer: TokioBufWriter<TokioFile>,
     file_metadata: FileMetadata,
     chunk_index: usize,
+    output_file_path: PathBuf,
 }
 
 impl FileDownloader {
@@ -31,6 +23,7 @@ impl FileDownloader {
             file_writer: TokioBufWriter::new(file),
             file_metadata,
             chunk_index: 0,
+            output_file_path: file_path,
         })
     }
 
@@ -38,6 +31,11 @@ impl FileDownloader {
     ///
     /// * `chunk_data` - byte slice containing padded chunk data and size of unpadded data
     pub async fn store_next_chunk_decrypt(&mut self, chunk: Chunk) -> Result<(), ShardingError> {
+        // Check if chunk.data is empty
+        if chunk.data.is_empty() {
+            return Err(ShardingError::EmptyChunk);
+        }
+
         if self.chunk_index >= self.file_metadata.chunks_metadata.len() {
             return Err(ShardingError::UnwantedChunk);
         }
@@ -49,7 +47,7 @@ impl FileDownloader {
             &self.file_metadata.encryption_key,
             &chunk_metadata.nonce,
         )
-        .map_err(|_| ShardingError::DecryptionFailed)?;
+        .map_err(|e| ShardingError::DecryptionFailed)?;
 
         // let mut chunk_data: DecryptedChunkData = bincode::deserialize(&decrypted_chunk_bytes)
         //     .map_err(|_| ShardingError::DecryptionFailed)?;
@@ -82,6 +80,10 @@ impl FileDownloader {
         }
         Ok(())
     }
+
+    pub fn get_output_file_path(&self) -> &Path {
+        &self.output_file_path
+    }
 }
 
 #[cfg(test)]
@@ -89,11 +91,8 @@ mod tests {
     use super::*;
     use crate::utils::testing::create_test_file_rng_filled;
 
-    use rand::Rng;
-    use std::path::PathBuf;
+    use crate::sharding::uploader::FileUploader;
     use tempfile::tempdir;
-    use tokio::fs::File as TokioFile;
-    use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
     async fn test_file_downloader_new() {

@@ -5,17 +5,11 @@ use crate::networking::node_info::NodeInfo;
 use crate::networking::tcp_listener::TcpListenerService;
 use crate::routing::routing_table::RoutingTable;
 use crate::storage::shard_storage_manager::ShardStorageManager;
-use anyhow::bail;
-use futures::future::err;
-use futures::FutureExt;
-use log::__private_api::loc;
 use log::{error, info, warn};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 use tokio::sync::RwLock;
-use tokio::time::timeout;
 
 const LOCALHOST: &str = "127.0.0.1:0";
 use super::node::Node;
@@ -74,7 +68,7 @@ pub async fn handle_received_request(
                 request,
                 message_dispatcher,
                 shard_storage_manager,
-                file_id, // TODO: rename to chunk_hash?
+                file_id,
             )
             .await;
         }
@@ -90,7 +84,7 @@ pub async fn handle_received_request(
             .await;
         }
         RequestType::GetValue { chunk_id, port } => {
-            handle_get_value(request, port).await;
+            handle_get_value(request, chunk_id, port, shard_storage_manager).await;
         }
     }
 }
@@ -194,9 +188,25 @@ async fn handle_find_value_message(
 ///
 ///
 ///
-async fn handle_get_value(request: Request, port: u16) {
-    // Get chunk from storage and convert it to data (Vec<u8>)
-    let data = Vec::new(); // TODO: get chunk from storage
+async fn handle_get_value(
+    request: Request,
+    chunk_id: Key,
+    port: u16,
+    shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
+) {
+    // Get chunk from storage and convert it to bytes
+    let data = match shard_storage_manager
+        .read()
+        .await
+        .read_chunk(&chunk_id)
+        .await
+    {
+        Ok(data) => data,
+        Err(e) => {
+            error!("Failed to get chunk from storage: {}", e);
+            return;
+        }
+    };
 
     // This will get the chunk from storage
     let address = format!("{}:{}", request.sender.address.ip(), port);
@@ -224,13 +234,12 @@ async fn handle_store_message(
     shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
     file_id: Key,
 ) {
-    // TODO: check first if chunk with this hash is already stored,
-    // in this case send response that chunk is already stored and just update TTL or smth.
     let chunk_exists = shard_storage_manager
         .read()
         .await
         .is_chunk_already_stored(&file_id);
 
+    // If we don't have this chunk, store it.
     let response = if !chunk_exists {
         Response::new(
             ResponseType::StoreOK,
@@ -238,6 +247,7 @@ async fn handle_store_message(
             request.sender.clone(), // Receiver field.
             request.request_id,
         )
+    // If we already have the chunk, update its TTL.
     } else {
         if let Err(e) = shard_storage_manager
             .write()

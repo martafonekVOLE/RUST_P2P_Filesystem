@@ -1,5 +1,5 @@
+use crate::constants::PING_TIMEOUT_MILLISECONDS;
 use crate::constants::{ALPHA, LOOKUP_TIMEOUT_MILLISECONDS};
-use crate::constants::{PING_TIMEOUT_MILLISECONDS, TCP_TIMEOUT_MILLISECONDS};
 use crate::core::incoming_request_handler::handle_received_request;
 use crate::core::key::Key;
 use crate::core::lookup::{LookupBuffer, LookupResponse, LookupSuccessType};
@@ -12,27 +12,22 @@ use crate::sharding::common::{Chunk, FileMetadata};
 use crate::sharding::uploader::FileUploader;
 use crate::storage::file_manager::FileManager;
 use crate::storage::shard_storage_manager::ShardStorageManager;
-use futures::future::{join_all, ready};
-use log::{error, info, warn};
+use futures::future::join_all;
+use log::{error, info};
 use std::cmp::PartialEq;
-use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpListener, TcpStream, UdpSocket as TokioUdpSocket};
+use tokio::net::{TcpStream, UdpSocket as TokioUdpSocket};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task;
 use tokio::time::{timeout, Duration};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::networking::tcp_listener::TcpListenerService;
 use crate::sharding::downloader::FileDownloader;
-use futures::{stream, FutureExt, StreamExt};
-use std::error::Error;
-
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -434,7 +429,7 @@ impl Node {
         response: Response,
         data: Vec<u8>,
     ) -> Result<()> {
-        if let (ResponseType::PortOK { port }) = response.response_type {
+        if let ResponseType::PortOK { port } = response.response_type {
             let address =
                 response.sender.address.ip().to_string() + ":" + port.to_string().as_str();
             let mut stream = TcpStream::connect(address)
@@ -534,7 +529,7 @@ impl Node {
     /// This can be called individually, or used by lookup_round for parallel calls.
     /// The type of resolution (Node/Value) is determined by the for_value parameter.
     ///
-    pub async fn single_lookup(
+    async fn single_lookup(
         &self,
         target: Key,
         resolver_node_info: NodeInfo,
@@ -587,7 +582,7 @@ impl Node {
     ///
     /// The type of resolution (Node/Value) is determined by the for_value parameter.
     ///
-    pub async fn lookup_round(
+    async fn lookup_round(
         &self,
         target: Key,
         resolvers: Vec<NodeInfo>,
@@ -680,7 +675,7 @@ impl Node {
         &self,
         file_metadata: FileMetadata,
         output_dir: &Path,
-    ) -> Result<()> {
+    ) -> Result<PathBuf> {
         // Extract the list of chunk keys from the file metadata.
         let chunk_keys: Vec<Key> = file_metadata
             .chunks_metadata
@@ -693,7 +688,7 @@ impl Node {
         info!("File {} is downloadable", file_metadata.name);
 
         // Init file downloader
-        let mut file_downloader = FileDownloader::new(file_metadata, output_dir).await?;
+        let mut file_downloader = FileDownloader::new(file_metadata.clone(), output_dir).await?;
 
         for (i, (chunk_id, chunk_storer)) in resolved_pairs.into_iter().enumerate() {
             // Download the chunk from the storer
@@ -701,16 +696,13 @@ impl Node {
                 .download_chunk_from_storer(chunk_id, chunk_storer)
                 .await?;
             info!(
-                "Chunk n.{} downloaded (number {} from {})",
+                "Chunk {} downloaded (number {} from {})",
                 chunk_id,
                 i + 1,
                 chunk_data.len()
             );
             // Store the chunk in the file.
             file_downloader
-                // FIXME Chunk offset must be stored inside the encrypted payload.
-                // FIXME This method must take chunk_id and chunk_data (encrypted data) only and
-                // FIXME get the offset from the encrypted payload.
                 .store_next_chunk_decrypt(Chunk {
                     hash: chunk_id,
                     data: chunk_data,
@@ -719,17 +711,14 @@ impl Node {
             info!("Chunk {} stored", chunk_id);
         }
 
-        Ok(())
+        Ok(PathBuf::from(file_downloader.get_output_file_path()))
     }
 
     ///
     /// This method resolves nodes responsible for the given chunk keys.
     /// The output can be used to download the chunks from the network.
     ///
-    pub async fn find_storers_parallel(
-        &self,
-        chunk_keys: Vec<Key>,
-    ) -> Result<Vec<(Key, NodeInfo)>> {
+    async fn find_storers_parallel(&self, chunk_keys: Vec<Key>) -> Result<Vec<(Key, NodeInfo)>> {
         let mut resolved_pairs = Vec::with_capacity(chunk_keys.len());
 
         // Process the chunk keys in batches of at most ALPHA.
@@ -761,7 +750,7 @@ impl Node {
     /// Finds the first node in the network that is physically storing the chunk with the given key.
     /// If the chunk is not found, an error is returned.
     ///
-    pub async fn find_storer(&self, target: Key) -> Result<NodeInfo> {
+    async fn find_storer(&self, target: Key) -> Result<NodeInfo> {
         // First step: Try to find _chunk locally
         if self
             .shard_storage_manager
@@ -873,6 +862,7 @@ impl Node {
 mod tests {
     use super::*;
     use crate::networking::messages::{RequestType, ResponseType};
+    use std::error::Error;
     use tokio::net::UdpSocket;
 
     #[tokio::test]

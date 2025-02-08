@@ -38,6 +38,8 @@ pub enum ShardingError {
     UnwantedChunk,
     #[error("Hash mismatch between metadata and chunk")]
     ChunkHashMismatch,
+    #[error("Empty chunk")]
+    EmptyChunk,
 }
 
 #[derive(Serialize, Deserialize)]

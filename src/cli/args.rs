@@ -14,7 +14,7 @@ pub struct Arguments {
     pub config: Option<String>,
 
     #[arg(long)]
-    /// TODO
+    /// Path to the cached node file. This is used to relaunch stopped nodes.
     pub cache: Option<String>,
 
     #[arg(short, long)]
@@ -29,6 +29,11 @@ pub struct Arguments {
     /// The port to run the node on. If not provided, a random port will be chosen. This overrides
     /// the port specified in the config file.
     pub port: Option<u16>,
+
+    #[arg(short, long)]
+    /// Creates the storage directory automatically based on this nodes key.
+    /// Overrides the storage path specified in the config file.
+    pub automatic_storage: bool,
 }
 
 /*
