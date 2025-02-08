@@ -3,6 +3,19 @@ use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
 use serde::{Deserialize, Serialize};
 
+///
+/// # The status of a lookup round.
+///
+/// This is used to determine the next steps in the lookup process.
+/// The result of a lookup round can be:
+/// ## Results:
+/// ### `Fail`: The lookup has failed.
+/// ### Success for find_node lookups: `ImprovedNodes`
+/// The lookup has improved the list of nodes (found closer nodes). This is used to determine if the lookup should continue.
+/// If no closer nodes are found, the lookup should terminate.
+/// ### Success for find_value lookups: `FoundValue`
+/// The lookup has found the value. This status should terminate the lookup.
+///
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum LookupRoundStatus {
     Fail,
@@ -10,6 +23,13 @@ pub enum LookupRoundStatus {
     FoundValue,
 }
 
+///
+/// # Extension for NodeInfo that includes lookup-specific information.
+///
+/// This is used to keep track of the state of a node in a lookup process.
+/// - queried: Has the node been queried - lookup request sent
+/// - responded: Has the node responded to the lookup request - this means the node is alive.
+///
 #[derive(Debug)]
 pub struct LookupNodeInfo {
     node_info: NodeInfo,
@@ -18,6 +38,10 @@ pub struct LookupNodeInfo {
 }
 
 impl LookupNodeInfo {
+    ///
+    /// Creates a fresh LookupNodeInfo with the given NodeInfo.
+    /// Should be constructed from recently discovered nodes.
+    ///
     pub fn new(node_info: NodeInfo) -> Self {
         LookupNodeInfo {
             node_info,
@@ -26,14 +50,24 @@ impl LookupNodeInfo {
         }
     }
 
+    ///
+    /// Returns true if the node has failed to respond during the lookup.
+    /// This means that the node has been queried but has not responded.
+    ///
     pub fn has_failed_to_respond(&self) -> bool {
         self.queried && !self.responded
     }
 
+    ///
+    /// Returns true if the node has responded during the lookup.
+    ///
     pub fn has_responded(&self) -> bool {
         self.queried && self.responded
     }
 
+    ///
+    /// Returns true if the node has been queried during the lookup.
+    ///
     pub fn has_been_queried(&self) -> bool {
         self.queried
     }
@@ -45,12 +79,29 @@ impl PartialEq for LookupNodeInfo {
     }
 }
 
+///
+/// # The type of success in a single lookup response.
+///
+/// This is used to determine the type of response in a lookup response. Can be either:
+/// - `Value`: The lookup has found the value.
+/// - `Nodes`: The lookup node has nod found a value requested in a value lookup, so it responds
+/// with the closest nodes it knows of. This implies that the queried node does not store the value.
+///
 #[derive(Serialize, Deserialize, Clone)]
 pub enum LookupSuccessType {
     Value,
     Nodes,
 }
 
+///
+/// # The response to a lookup request.
+///
+/// This is used to respond to a lookup request. The response can be either:
+/// - `Nodes`: The lookup has found nodes that are closer to the target, OR the node does not store the value
+/// during a value lookup, so it responds with the closest nodes it knows of. This is determined by
+/// the `success_type` field.
+/// - `Value`: The lookup has found the value.
+///
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LookupResponse {
     resolver: NodeInfo,
@@ -60,6 +111,9 @@ pub struct LookupResponse {
 }
 
 impl LookupResponse {
+    ///
+    /// Constructor for a successful lookup response with nodes.
+    ///
     pub fn new_nodes_successful(resolver: NodeInfo, k_closest: Vec<NodeInfo>) -> Self {
         LookupResponse {
             resolver,
@@ -69,6 +123,9 @@ impl LookupResponse {
         }
     }
 
+    ///
+    /// Constructor for a successful lookup response with a value.
+    ///
     pub fn new_value_successful(resolver: NodeInfo) -> Self {
         LookupResponse {
             resolver,
@@ -78,6 +135,9 @@ impl LookupResponse {
         }
     }
 
+    ///
+    /// Constructor for a failed lookup response.
+    ///
     pub fn new_failed(resolver: NodeInfo) -> Self {
         LookupResponse {
             resolver,
@@ -87,23 +147,59 @@ impl LookupResponse {
         }
     }
 
+    ///
+    /// Returns the resolver node of this lookup response.
+    ///
     pub fn get_resolver(&self) -> NodeInfo {
         self.resolver.clone()
     }
 
+    ///
+    /// Returns the K closest nodes the resolver knows of for this lookup response.
+    ///
     pub fn get_k_closest(&self) -> Vec<NodeInfo> {
         self.k_closest.clone()
     }
 
+    ///
+    /// Returns true if the lookup was successful.
+    ///
     pub fn was_successful(&self) -> bool {
         self.success
     }
 
+    ///
+    /// Returns the type of success for this lookup response.
+    /// This can be either:
+    /// `Value`: The lookup has found the value.
+    /// `Nodes`:
+    /// For a find_value lookup, the resolver node has nod found a value requested in a value lookup, so it responds
+    /// with the closest nodes it knows of. This implies that the queried node does not store the value.
+    /// For a find_node lookup, these are the closest nodes to the target the resolver knows of.
+    ///
     pub fn get_success_type(&self) -> Option<LookupSuccessType> {
         self.success_type.clone()
     }
 }
 
+///
+/// # A helpers struct for resolving a `find_value` or `find_node` lookup.
+///
+/// This structure keeps a vector of nodes that are closest to the target key. For each lookup iteration,
+/// the method `record_lookup_round_responses` should be called with the responses from the nodes that were queried.
+/// This returns a bool signifying whether the lookup should continue.
+/// - For `find_value` lookups, the bool means 'was value found'
+/// - For `find_node` lookups, this signifies whether the list of closest nodes has been improved, e.g.
+/// 'did the results improve'.
+///
+/// These results are necessary to control the Kademlia parallel iterative lookup algorithm.
+///
+/// When the algorithm is finished, the resulting nodes can be retrieved with `get_resulting_vector()`.
+///
+/// This struct also keeps the nodes sorted, deduplicated and keeps track of unresponsive nodes.
+///
+/// Encountered nodes to be used for kbucket updates can be retrieved with `get_responsive_nodes()`.
+///
 pub struct LookupBuffer {
     nodes: Vec<LookupNodeInfo>,
     target: Key,
@@ -111,6 +207,16 @@ pub struct LookupBuffer {
 }
 
 impl LookupBuffer {
+    ///
+    /// Constructor for a new LookupBuffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - The target key of the lookup.
+    /// * `initial_nodes` - The initial nodes to start the lookup with. You should get them from
+    ///  - it should be alpha nodes closest to the target that you can find in this node's routing table.
+    /// * `this_node` - The node that is performing the lookup.
+    ///
     pub(crate) fn new(target: Key, initial_nodes: Vec<NodeInfo>, this_node: NodeInfo) -> Self {
         let mut nodes = Vec::new();
         for node in initial_nodes {
@@ -125,6 +231,12 @@ impl LookupBuffer {
         result_buffer
     }
 
+    ///
+    /// Gets the result nodes of the lookup for the current state of the buffer.
+    /// This will be maximum `K` closest nodes to the target that are responsive.
+    ///
+    /// *Hint: Just call this once you're done with the lookup to get the final result.*
+    ///
     pub(crate) fn get_resulting_vector(&self) -> Vec<NodeInfo> {
         self.nodes
             .iter()
@@ -134,14 +246,68 @@ impl LookupBuffer {
             .collect()
     }
 
-    fn sort(&mut self) {
-        self.nodes.sort_by(|a, b| {
-            let dist_a = a.node_info.id.distance(&self.target);
-            let dist_b = b.node_info.id.distance(&self.target);
-            dist_a.cmp(&dist_b)
-        });
+    ///
+    /// Gets the nodes from the top `K` closest to the target that haven't been queried yet
+    ///
+    /// This is supposed to be called after the iterative part of the Kademlia lookup protocol
+    /// has been completed. The nodes gathered from this method should be used perform the last round
+    /// of lookup which can ignore the `ALPHA` parallelism constraint.
+    ///
+    pub(crate) fn get_unqueried_resulting_nodes(&self) -> Vec<NodeInfo> {
+        self.nodes
+            .iter()
+            .take(K)
+            .filter(|node| !node.queried)
+            .map(|node| node.node_info.clone())
+            .collect()
     }
 
+    ///
+    /// Gets the `ALPHA` closest nodes to the target that haven't been queried yet.
+    /// This should be used in each of the iterative lookup steps and parallel requests should be
+    /// sent to these nodes during the lookup round.
+    ///
+    pub(crate) fn get_alpha_unqueried_nodes(&mut self) -> Vec<NodeInfo> {
+        let candidates: Vec<NodeInfo> = self
+            .nodes
+            .iter()
+            .filter(|node| !node.queried)
+            .map(|node| node.node_info.clone())
+            .take(ALPHA)
+            .collect();
+
+        // Mark candidates as queried
+        for node in candidates.iter() {
+            self.mark_node_as_queried(node.id);
+        }
+        candidates
+    }
+
+    ///
+    /// Get all responsive nodes that have been encountered over the existence of this lookup buffer.
+    /// Note: this will always return unspecified number 0f unique nodes.
+    ///
+    pub(crate) fn get_responsive_nodes(&self) -> Vec<NodeInfo> {
+        self.nodes
+            .iter()
+            .filter(|node| node.queried && node.responded)
+            .map(|node| node.node_info.clone())
+            .collect()
+    }
+
+    ///
+    /// # Main method for recording lookup iteration result
+    ///
+    /// This method should be called after each iteration of the lookup process to store the results.
+    /// It will only store unique nodes and sort them by distance to the target.
+    ///
+    /// # Arguments
+    /// * `responses` - The responses from the nodes that were queried in the lookup iteration.
+    /// * `for_value` - Whether the lookup is find_value or find_node type.
+    /// If this method is in a find_value lookup, it will return true if the value was found.
+    /// If this method is in a find_node lookup or the value was not found in the find_value lookup,
+    /// it will return true if the list of closest nodes has been improved.
+    ///
     pub(crate) fn record_lookup_round_responses(
         &mut self,
         responses: Vec<LookupResponse>,
@@ -150,7 +316,8 @@ impl LookupBuffer {
         let previous_k_closest = self.get_resulting_vector();
 
         for response in responses {
-            // If value is being looked up, this will return true
+            // For find_value lookup - this will return true if we found the value and should
+            // terminate the lookup in such circumstances.
             if for_value && matches!(response.success_type, Some(LookupSuccessType::Value)) {
                 return true;
             }
@@ -178,6 +345,20 @@ impl LookupBuffer {
         previous_k_closest != self.get_resulting_vector()
     }
 
+    ///
+    /// Sorts the nodes in the buffer by XOR distance to the target.
+    ///
+    fn sort(&mut self) {
+        self.nodes.sort_by(|a, b| {
+            let dist_a = a.node_info.id.distance(&self.target);
+            let dist_b = b.node_info.id.distance(&self.target);
+            dist_a.cmp(&dist_b)
+        });
+    }
+
+    ///
+    /// Checks if there isn't a key collision for nodes in the buffer.
+    ///
     fn check_node_key_uniqueness(&self, node: NodeInfo) -> bool {
         self.nodes
             .iter()
@@ -186,6 +367,9 @@ impl LookupBuffer {
             == 0
     }
 
+    ///
+    /// Marks an input node given by key as queried.
+    ///
     fn mark_node_as_queried(&mut self, node_id: Key) {
         for node in self.nodes.iter_mut() {
             if node.node_info.id == node_id {
@@ -194,6 +378,9 @@ impl LookupBuffer {
         }
     }
 
+    ///
+    /// Marks an input node given by key as responded.
+    ///
     fn mark_node_as_responded(&mut self, node_id: Key) {
         for node in self.nodes.iter_mut() {
             if node.node_info.id == node_id {
@@ -202,43 +389,13 @@ impl LookupBuffer {
         }
     }
 
-    pub(crate) fn get_alpha_unqueried_nodes(&mut self) -> Vec<NodeInfo> {
-        let candidates: Vec<NodeInfo> = self
-            .nodes
-            .iter()
-            .filter(|node| !node.queried)
-            .map(|node| node.node_info.clone())
-            .take(ALPHA)
-            .collect();
-
-        // Mark candidates as queried
-        for node in candidates.iter() {
-            self.mark_node_as_queried(node.id);
-        }
-        candidates
-    }
-
+    ///
+    /// Get the nodes that have been queried but have not responded.
+    ///
     fn get_unresponsive_nodes(&self) -> Vec<NodeInfo> {
         self.nodes
             .iter()
             .filter(|node| node.queried && !node.responded)
-            .map(|node| node.node_info.clone())
-            .collect()
-    }
-
-    pub(crate) fn get_responsive_nodes(&self) -> Vec<NodeInfo> {
-        self.nodes
-            .iter()
-            .filter(|node| node.queried && node.responded)
-            .map(|node| node.node_info.clone())
-            .collect()
-    }
-
-    pub(crate) fn get_unqueried_resulting_nodes(&self) -> Vec<NodeInfo> {
-        self.nodes
-            .iter()
-            .take(K)
-            .filter(|node| !node.queried)
             .map(|node| node.node_info.clone())
             .collect()
     }

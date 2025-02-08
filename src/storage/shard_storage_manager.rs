@@ -1,13 +1,11 @@
 use crate::core::key::Key as Hash;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
-use crate::sharding::common::{Chunk, CHUNK_READ_KB_LARGE, CHUNK_SIZE_KB_LARGE};
+use crate::sharding::common::{Chunk, CHUNK_READ_KB, CHUNK_SIZE_B};
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
-use crate::utils::testing::to_unix_path;
 use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
@@ -63,7 +61,7 @@ impl ShardStorageManager {
                 }
                 let chunk_size = data.len();
 
-                if chunk_size > CHUNK_SIZE_KB_LARGE * 1024 {
+                if chunk_size > CHUNK_SIZE_B {
                     bail!("Invalid chunk size");
                 }
                 if MAX_DATA_STORED_MB * 1024 - self.total_stored_kb < chunk_size {
@@ -188,6 +186,10 @@ impl ShardStorageManager {
             .cloned()
             .collect()
     }
+
+    pub fn get_owned_chunk_keys(&self) -> Vec<Hash> {
+        self.owned_chunks.keys().cloned().collect()
+    }
 }
 
 #[cfg(test)]
@@ -198,9 +200,8 @@ mod tests {
 
     fn create_test_chunk() -> Chunk {
         Chunk {
-            data: vec![0; CHUNK_SIZE_KB_LARGE],
+            data: vec![0; CHUNK_SIZE_B],
             hash: Hash::new_random(),
-            decrypted_data_unpadded_size: CHUNK_READ_KB_LARGE,
         }
     }
 
