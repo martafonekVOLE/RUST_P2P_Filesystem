@@ -1,10 +1,11 @@
 use super::encryption::AES_GCM_AUTH_TAG_SIZE;
 use crate::core::key::Key as Hash;
-use rand::Rng;
+use anyhow::{Context, Result};
+use fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::{self, BufReader};
-use std::path::Path;
+use std::fmt;
+use std::io::{self};
+use std::str::FromStr;
 use thiserror::Error;
 
 // Actual size of the chunk will be 16 bytes longer
@@ -44,16 +45,39 @@ pub struct Chunk {
                     // because no need to verify it, AEAD auth tag already ensures integrity
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChunkMetadata {
     pub hash: Hash,
     pub nonce: Vec<u8>, // Is required to decrypt the message. 12-byte long unique value.
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileMetadata {
     pub name: String,
     pub size: usize, // E.g. to know which chunk size to expect
     pub encryption_key: Vec<u8>,
     pub chunks_metadata: Vec<ChunkMetadata>,
+}
+
+impl Display for FileMetadata {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        // Serialize self using bincode
+        match bincode::serialize(self) {
+            Ok(bytes) => write!(f, "{}", hex::encode(bytes)),
+            Err(e) => write!(f, "Serialization error: {}", e),
+        }
+    }
+}
+
+impl FromStr for FileMetadata {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        // Decode the hex string back into bytes.
+        let bytes = hex::decode(s).context("Failed to decode hex string")?;
+        // Deserialize the bytes back into a FileMetadata.
+        let metadata =
+            bincode::deserialize(&bytes).context("Failed to deserialize FileMetadata")?;
+        Ok(metadata)
+    }
 }
