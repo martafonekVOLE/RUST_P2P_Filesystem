@@ -1,6 +1,7 @@
 use crate::core::key::Key as Hash;
+use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
-use crate::sharding::common::{Chunk, CHUNK_SIZE_KB_LARGE, CHUNK_SIZE_KB_SMALL};
+use crate::sharding::common::{Chunk, CHUNK_READ_KB_LARGE, CHUNK_SIZE_KB_LARGE};
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
 use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
@@ -16,12 +17,12 @@ const DEFAULT_CHUNK_REUPLOAD_INTERVAL_S: u64 = 3600; // 1 h
 const DEFAULT_CHUNK_EXPIRE_TIME_S: u64 = 86400; // 24 h
 
 pub struct StoredChunkInfo {
-    pub time_stored: SystemTime,
+    pub time_stored_at: SystemTime,
 }
 
 impl StoredChunkInfo {
     pub fn update_time(&mut self, time: SystemTime) {
-        self.time_stored = time;
+        self.time_stored_at = time;
     }
 }
 
@@ -81,7 +82,7 @@ impl ShardStorageManager {
                 self.owned_chunks.insert(
                     chunk_hash,
                     StoredChunkInfo {
-                        time_stored: SystemTime::now(),
+                        time_stored_at: SystemTime::now(),
                     },
                 );
             }
@@ -109,7 +110,9 @@ impl ShardStorageManager {
         let dead: Vec<Hash> = self
             .owned_chunks
             .iter()
-            .filter(|(_, info)| info.time_stored.elapsed().unwrap().as_secs() >= self.expire_time_s)
+            .filter(|(_, info)| {
+                info.time_stored_at.elapsed().unwrap().as_secs() >= self.expire_time_s
+            })
             .map(|(hash, _)| hash.clone())
             .collect();
 
@@ -133,7 +136,7 @@ impl ShardStorageManager {
             .owned_chunks
             .iter()
             .filter(|(_, info)| {
-                info.time_stored.elapsed().unwrap().as_secs() >= self.reupload_interval_s
+                info.time_stored_at.elapsed().unwrap().as_secs() >= self.reupload_interval_s
             })
             .map(|(hash, _)| hash.clone())
             .collect();
@@ -171,8 +174,17 @@ impl ShardStorageManager {
         }
     }
 
-    pub fn get_owned_chunk_keys(&self) -> Vec<Hash> {
-        self.owned_chunks.keys().cloned().collect()
+    /// Hashes can then be used to read the chunk data and send it to node that is closer
+    pub fn get_chunks_closer_to_node_than_to_me(
+        &self,
+        my_id: &Key,
+        other_node_id: &Key,
+    ) -> Vec<Hash> {
+        self.owned_chunks
+            .keys()
+            .filter(|&chunk_hash| chunk_hash.distance(other_node_id) < chunk_hash.distance(my_id))
+            .cloned()
+            .collect()
     }
 }
 
@@ -184,8 +196,9 @@ mod tests {
 
     fn create_test_chunk() -> Chunk {
         Chunk {
-            data: vec![0; CHUNK_SIZE_KB_SMALL],
+            data: vec![0; CHUNK_SIZE_KB_LARGE],
             hash: Hash::new_random(),
+            decrypted_data_unpadded_size: CHUNK_READ_KB_LARGE,
         }
     }
 
@@ -231,7 +244,7 @@ mod tests {
             .owned_chunks
             .get_mut(&chunk.hash)
             .unwrap()
-            .time_stored = SystemTime::now() - Duration::from_secs(manager.expire_time_s + 1);
+            .time_stored_at = SystemTime::now() - Duration::from_secs(manager.expire_time_s + 1);
 
         let result = manager.remove_dead_chunks().await;
         assert!(result.is_ok());
@@ -261,7 +274,8 @@ mod tests {
             .owned_chunks
             .get_mut(&chunk.hash)
             .unwrap()
-            .time_stored = SystemTime::now() - Duration::from_secs(manager.reupload_interval_s + 1);
+            .time_stored_at =
+            SystemTime::now() - Duration::from_secs(manager.reupload_interval_s + 1);
 
         let chunks_for_reupload = manager
             .get_chunks_for_reupload()

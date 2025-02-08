@@ -37,7 +37,7 @@ pub struct Node {
     pub key: Key,
     pub address: SocketAddr,
     socket: Arc<TokioUdpSocket>, // Use Tokio's UdpSocket for async I/O
-    routing_table: Arc<RwLock<RoutingTable>>,
+    pub routing_table: Arc<RwLock<RoutingTable>>,
     request_map: RequestMap, // RequestMap is thread safe by design (has Arc<RwLock<HashMap>> inside)
     message_dispatcher: Arc<MessageDispatcher>,
     file_manager: Arc<FileManager>,
@@ -109,7 +109,7 @@ impl Node {
         &self,
         request: Request,
         timeout_milliseconds: u64,
-    ) -> Result<Response> {
+    ) -> Result<Response, NodeError> {
         let request_id = request.request_id;
 
         // Create a one-shot channel that will get the response from the receiving loop
@@ -131,12 +131,13 @@ impl Node {
             // Received something from the channel
             Ok(Ok(response)) => Ok(response),
             // The sender was dropped or otherwise no data came
-            Ok(Err(_)) => bail!("No response received on the channel."),
+            Ok(Err(_)) => Err(NodeError::BadResponse),
             // Timeout expired
             Err(_) => {
                 // Remove the request from the map
                 self.request_map.remove_request(&request_id).await;
-                bail!("Timed out awaiting response.")
+                // "Timed out awaiting response."
+                Err(NodeError::ResponseTimeout)
             }
         }
     }
@@ -145,7 +146,7 @@ impl Node {
     /// Sends a PING request to the specified node ID.
     /// Awaits a PONG response and returns whether the node is reachable.
     ///
-    pub async fn ping(&self, node_id: Key) -> Result<Response> {
+    pub async fn ping(&self, node_id: Key) -> Result<Response, NodeError> {
         // Get the address from the RoutingTable
         let receiver_info = match self.routing_table.read().await.get_nodeinfo(&node_id)? {
             Some(info) => info.clone(),
@@ -166,7 +167,11 @@ impl Node {
     ///
     pub async fn find_node(&self, target: Key) -> Result<Vec<NodeInfo>> {
         // Initial resolvers are the alpha closest nodes to the target in our RT
-        let initial_resolvers = self.routing_table.read().await.get_alpha_closest(&target)?;
+        let initial_resolvers = self
+            .routing_table
+            .write()
+            .await
+            .lookup_get_alpha_closest(&target)?;
         if initial_resolvers.is_empty() {
             bail!("No initial resolvers available for find_node resolutions");
         }
@@ -199,7 +204,7 @@ impl Node {
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
         for node_info in lookup_buffer.get_responsive_nodes() {
-            routing_table.store_nodeinfo(node_info)?;
+            routing_table.store_nodeinfo(node_info, &self);
         }
 
         // Render the final result
@@ -498,7 +503,7 @@ impl Node {
         // Update routing table with the responsive nodes
         let mut routing_table = self.routing_table.write().await;
         for node_info in lookup_buffer.get_responsive_nodes() {
-            routing_table.store_nodeinfo(node_info)?;
+            routing_table.store_nodeinfo(node_info, &self).await?;
         }
 
         info!("Successfully joined the network!");
@@ -592,7 +597,7 @@ impl Node {
     /// Incoming messages are parsed and dispatched to the appropriate handler.
     /// This method is non-blocking and runs in the background.
     ///
-    pub fn start_listening(&self) {
+    pub fn start_listening(self: Arc<Self>) {
         // Load references to the fields of the Node struct
         let socket = Arc::clone(&self.socket);
         let routing_table = Arc::clone(&self.routing_table);
@@ -625,8 +630,10 @@ impl Node {
                             let message_dispatcher = Arc::clone(&message_dispatcher);
                             let shard_manager = Arc::clone(&shard_manager);
                             let this_node_info = this_node_info.clone();
+                            let this = self.clone();
                             task::spawn(async move {
                                 handle_received_request(
+                                    this,
                                     this_node_info,
                                     request,
                                     routing_table,
@@ -853,8 +860,9 @@ mod tests {
         let node = Node::new(key, "127.0.0.1".to_string(), 8081, "/".to_string()).await?;
         let node_address = node.address;
 
+        let node_clone = Arc::clone(&node);
         // Start the listener so the node can receive requests.
-        node.start_listening();
+        node_clone.start_listening();
 
         // Create a Ping request from a separate ephemeral socket.
         let ephemeral_socket = UdpSocket::bind("127.0.0.1:0").await?;

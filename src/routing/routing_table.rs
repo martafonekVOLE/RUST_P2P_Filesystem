@@ -1,6 +1,7 @@
 use super::kbucket::*;
 use crate::constants::{ALPHA, K};
 use crate::core::key::Key;
+use crate::core::node::Node;
 use crate::networking::node_info::NodeInfo;
 
 use thiserror::Error;
@@ -21,16 +22,11 @@ pub enum RoutingTableError {
     AttempStoreSelf,
 }
 
-impl From<RoutingTableError> for String {
-    fn from(error: RoutingTableError) -> Self {
-        error.to_string()
-    }
-}
+const DEFAULT_BUCKET_REFRESH_INTERVAL_S: u64 = 3600; // 1 h
 
 pub struct RoutingTable {
     id: Key,
     buckets: Vec<KBucket>,
-    // bucket_size: usize, // TODO: remove?
 }
 
 impl RoutingTable {
@@ -43,14 +39,17 @@ impl RoutingTable {
         RoutingTable {
             id,
             buckets: vec![KBucket::new(); Self::NUM_BUCKETS],
-            //bucket_size: K,
         }
     }
 
-    pub fn store_nodeinfo(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
+    pub async fn store_nodeinfo(
+        &mut self,
+        node_info: NodeInfo,
+        node: &Node,
+    ) -> Result<(), RoutingTableError> {
         let bucket_index = self.get_bucket_index(&node_info.get_id())?;
         if let Some(bucket) = self.buckets.get_mut(bucket_index) {
-            bucket.add_nodeinfo(node_info)?;
+            bucket.add_nodeinfo(node_info, node).await?;
             Ok(())
         } else {
             Err(RoutingTableError::BucketNotFoundForId {
@@ -59,12 +58,25 @@ impl RoutingTable {
         }
     }
 
-    pub fn store_nodeinfo_multiple(
+    fn store_nodeinfo_limited(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
+        let bucket_index = self.get_bucket_index(&node_info.get_id())?;
+        if let Some(bucket) = self.buckets.get_mut(bucket_index) {
+            bucket.add_nodeinfo_limited(node_info)?;
+            Ok(())
+        } else {
+            Err(RoutingTableError::BucketNotFoundForId {
+                id: node_info.get_id(),
+            })
+        }
+    }
+
+    pub async fn store_nodeinfo_multiple(
         &mut self,
         node_infos: Vec<NodeInfo>,
+        node: &Node,
     ) -> Result<(), RoutingTableError> {
         for node_info in node_infos {
-            self.store_nodeinfo(node_info)?;
+            self.store_nodeinfo(node_info, node).await?;
         }
         Ok(())
     }
@@ -74,12 +86,25 @@ impl RoutingTable {
         Ok(self.buckets[bucket_index].get_nodeinfo(key))
     }
 
+    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
     pub fn get_alpha_closest(&self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
         self.get_n_closest(key, ALPHA)
     }
 
+    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
     pub fn get_k_closest(&self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
         self.get_n_closest(key, K)
+    }
+
+    pub fn lookup_get_alpha_closest(
+        &mut self,
+        key: &Key,
+    ) -> Result<Vec<NodeInfo>, RoutingTableError> {
+        self.lookup_get_n_closest(key, ALPHA)
+    }
+
+    pub fn lookup_get_k_closest(&mut self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
+        self.lookup_get_n_closest(key, K)
     }
 
     /// Closest k-bucket has the most leading zeroes in distance
@@ -92,6 +117,21 @@ impl RoutingTable {
         }
     }
 
+    fn lookup_get_n_closest(
+        &mut self,
+        key: &Key,
+        n: usize,
+    ) -> Result<Vec<NodeInfo>, RoutingTableError> {
+        let bucket_index_of_key = self.get_bucket_index(key)?;
+
+        let bucket = &mut self.buckets[bucket_index_of_key];
+        // Update last lookup time of k-bucket
+        // TODO: maybe find a better way to do this
+        bucket.set_last_lookup_now();
+        self.get_n_closest(key, n)
+    }
+
+    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
     fn get_n_closest(&self, key: &Key, n: usize) -> Result<Vec<NodeInfo>, RoutingTableError> {
         /*
         Take all from bucket[i]
@@ -164,12 +204,40 @@ impl RoutingTable {
         Ok(result.into_iter().take(n).collect())
     }
 
+    // Used for logging
     pub fn get_all_nodeinfos(&self) -> Vec<NodeInfo> {
         let mut all_nodes = Vec::new();
         for bucket in &self.buckets {
             all_nodes.extend(bucket.get_nodeinfos().iter().cloned());
         }
         all_nodes
+    }
+
+    /// Generate random key (id) that is in range of bucket with provided index
+    fn get_random_id_for_bucket(&self, bucket_i: usize) -> Key {
+        let mut key = Key::new_random();
+        // Bucket index to leading zeroes
+        let lz = 160 - bucket_i - 1;
+        key.make_exactly_n_same_leading_bits_as(&self.id, lz);
+        key
+    }
+
+    /// Returns random ids for each bucket that was not a target of lookup for constant amount of time
+    pub fn get_node_ids_for_refresh(&self) -> Vec<Key> {
+        self.buckets
+            .iter()
+            .enumerate()
+            .filter_map(|(index, bucket)| {
+                if bucket.last_lookup_at.elapsed().unwrap().as_secs()
+                    >= DEFAULT_BUCKET_REFRESH_INTERVAL_S
+                {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .map(|index| self.get_random_id_for_bucket(index))
+            .collect()
     }
 }
 
@@ -219,7 +287,7 @@ mod tests {
             */
             for _ in 0..num_nodes {
                 let node = NodeInfo::new_local(Key::new_random());
-                self.store_nodeinfo(node).unwrap_or_default();
+                self.store_nodeinfo_limited(node).unwrap_or_default();
             }
         }
 
@@ -240,7 +308,9 @@ mod tests {
                     let lz_true = self.id.leading_zeros_in_distance(&key);
                     assert!(lz_true == lz);
 
-                    bucket.add_nodeinfo(NodeInfo::new_local(key)).unwrap();
+                    bucket
+                        .add_nodeinfo_limited(NodeInfo::new_local(key))
+                        .unwrap();
                 }
             }
         }
@@ -287,7 +357,7 @@ mod tests {
         let remote_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 8080);
         let node_info = NodeInfo::new(remote_id, remote_address);
 
-        match routing_table.store_nodeinfo(node_info.clone()) {
+        match routing_table.store_nodeinfo_limited(node_info.clone()) {
             Ok(()) => (),
             Err(err) => eprintln!(
                 "Failed to store nodeinfo with key: {}. My key: {}. {}",
@@ -333,9 +403,9 @@ mod tests {
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8082),
         );
 
-        routing_table.store_nodeinfo(node1.clone()).unwrap();
-        routing_table.store_nodeinfo(node2.clone()).unwrap();
-        routing_table.store_nodeinfo(node3.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node1.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node2.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node3.clone()).unwrap();
 
         let num_fetch = 3;
 
@@ -366,9 +436,9 @@ mod tests {
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8082),
         );
 
-        routing_table.store_nodeinfo(node1.clone()).unwrap();
-        routing_table.store_nodeinfo(node2.clone()).unwrap();
-        routing_table.store_nodeinfo(node3.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node1.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node2.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node3.clone()).unwrap();
 
         let num_fetch = 3;
 
@@ -384,7 +454,7 @@ mod tests {
     #[test]
     fn test_get_n_closest_empty() {
         let id = Key::new_random();
-        let routing_table = RoutingTable::new(id);
+        let mut routing_table = RoutingTable::new(id);
 
         let node_id = Key::new_random();
         let result = routing_table.get_n_closest(&node_id, 2);
@@ -428,10 +498,10 @@ mod tests {
             SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8083),
         );
 
-        routing_table.store_nodeinfo(node1.clone()).unwrap();
-        routing_table.store_nodeinfo(node2.clone()).unwrap();
-        routing_table.store_nodeinfo(node3.clone()).unwrap();
-        routing_table.store_nodeinfo(node4.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node1.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node2.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node3.clone()).unwrap();
+        routing_table.store_nodeinfo_limited(node4.clone()).unwrap();
 
         key[0] = 0b00000000;
         key[1] = 0b00000001;
