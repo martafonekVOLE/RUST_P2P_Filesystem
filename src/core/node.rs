@@ -163,7 +163,11 @@ impl Node {
     ///
     pub async fn find_node(&self, target: Key) -> Result<Vec<NodeInfo>> {
         // Initial resolvers are the alpha closest nodes to the target in our RT
-        let initial_resolvers = self.routing_table.read().await.get_alpha_closest(&target)?;
+        let initial_resolvers = self
+            .routing_table
+            .write()
+            .await
+            .lookup_get_alpha_closest(&target)?;
         if initial_resolvers.is_empty() {
             bail!("No initial resolvers available for find_node resolutions");
         }

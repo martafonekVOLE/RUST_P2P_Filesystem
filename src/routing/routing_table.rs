@@ -22,10 +22,11 @@ pub enum RoutingTableError {
     AttempStoreSelf,
 }
 
+const DEFAULT_BUCKET_REFRESH_INTERVAL_S: u64 = 3600; // 1 h
+
 pub struct RoutingTable {
     id: Key,
     buckets: Vec<KBucket>,
-    // bucket_size: usize, // TODO: remove?
 }
 
 impl RoutingTable {
@@ -38,7 +39,6 @@ impl RoutingTable {
         RoutingTable {
             id,
             buckets: vec![KBucket::new(); Self::NUM_BUCKETS],
-            //bucket_size: K,
         }
     }
 
@@ -86,12 +86,25 @@ impl RoutingTable {
         Ok(self.buckets[bucket_index].get_nodeinfo(key))
     }
 
+    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
     pub fn get_alpha_closest(&self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
         self.get_n_closest(key, ALPHA)
     }
 
+    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
     pub fn get_k_closest(&self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
         self.get_n_closest(key, K)
+    }
+
+    pub fn lookup_get_alpha_closest(
+        &mut self,
+        key: &Key,
+    ) -> Result<Vec<NodeInfo>, RoutingTableError> {
+        self.lookup_get_n_closest(key, ALPHA)
+    }
+
+    pub fn lookup_get_k_closest(&mut self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
+        self.lookup_get_n_closest(key, K)
     }
 
     /// Closest k-bucket has the most leading zeroes in distance
@@ -104,6 +117,21 @@ impl RoutingTable {
         }
     }
 
+    fn lookup_get_n_closest(
+        &mut self,
+        key: &Key,
+        n: usize,
+    ) -> Result<Vec<NodeInfo>, RoutingTableError> {
+        let bucket_index_of_key = self.get_bucket_index(key)?;
+
+        let bucket = &mut self.buckets[bucket_index_of_key];
+        // Update last lookup time of k-bucket
+        // TODO: maybe find a better way to do this
+        bucket.set_last_lookup_now();
+        self.get_n_closest(key, n)
+    }
+
+    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
     fn get_n_closest(&self, key: &Key, n: usize) -> Result<Vec<NodeInfo>, RoutingTableError> {
         /*
         Take all from bucket[i]
@@ -176,12 +204,40 @@ impl RoutingTable {
         Ok(result.into_iter().take(n).collect())
     }
 
+    // Used for logging
     pub fn get_all_nodeinfos(&self) -> Vec<NodeInfo> {
         let mut all_nodes = Vec::new();
         for bucket in &self.buckets {
             all_nodes.extend(bucket.get_nodeinfos().iter().cloned());
         }
         all_nodes
+    }
+
+    /// Generate random key (id) that is in range of bucket with provided index
+    fn get_random_id_for_bucket(&self, bucket_i: usize) -> Key {
+        let mut key = Key::new_random();
+        // Bucket index to leading zeroes
+        let lz = 160 - bucket_i - 1;
+        key.make_exactly_n_same_leading_bits_as(&self.id, lz);
+        key
+    }
+
+    /// Returns random ids for each bucket that was not a target of lookup for constant amount of time
+    pub fn get_node_ids_for_refresh(&self) -> Vec<Key> {
+        self.buckets
+            .iter()
+            .enumerate()
+            .filter_map(|(index, bucket)| {
+                if bucket.last_lookup_at.elapsed().unwrap().as_secs()
+                    >= DEFAULT_BUCKET_REFRESH_INTERVAL_S
+                {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .map(|index| self.get_random_id_for_bucket(index))
+            .collect()
     }
 }
 
@@ -398,7 +454,7 @@ mod tests {
     #[test]
     fn test_get_n_closest_empty() {
         let id = Key::new_random();
-        let routing_table = RoutingTable::new(id);
+        let mut routing_table = RoutingTable::new(id);
 
         let node_id = Key::new_random();
         let result = routing_table.get_n_closest(&node_id, 2);

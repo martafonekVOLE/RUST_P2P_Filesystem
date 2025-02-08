@@ -4,6 +4,7 @@ use crate::core::node::{Node, NodeError};
 use crate::networking::node_info::NodeInfo;
 use std::collections::VecDeque;
 
+use std::time::SystemTime;
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -18,6 +19,7 @@ pub enum KBucketError {
 pub struct KBucket {
     nodes: VecDeque<NodeInfo>,
     capacity: usize,
+    pub last_lookup_at: SystemTime,
     /*
     TODO: channel for communication with sender
     */
@@ -50,7 +52,12 @@ impl KBucket {
         KBucket {
             nodes: VecDeque::with_capacity(K),
             capacity: K,
+            last_lookup_at: SystemTime::now(),
         }
+    }
+
+    pub fn set_last_lookup_now(&mut self) {
+        self.last_lookup_at = SystemTime::now();
     }
 
     pub async fn add_nodeinfo(
