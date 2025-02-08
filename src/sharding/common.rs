@@ -41,17 +41,13 @@ pub enum ShardingError {
 #[derive(Clone)]
 pub struct Chunk {
     pub data: Vec<u8>,
-
-    // TODO: maybe don't need to pass hash to external modules.
-    // Already contained in metadata.
-    // because no need to verify it, AEAD auth tag already ensures integrity
-    pub hash: Hash,
+    pub hash: Hash,                          // Hash of padded unencrypted chunk
     pub decrypted_data_unpadded_size: usize, // Real size of decrypted without possible padding
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChunkMetadata {
-    pub hash: Hash,
+    pub hash: Hash,     // Hash of padded unencrypted chunk
     pub nonce: Vec<u8>, // Is required to decrypt the message. 12-byte long unique value.
 }
 

@@ -18,7 +18,7 @@ pub struct FileUploader {
     file_reader: TokioBufReader<TokioFile>,
     file_metadata: FileMetadata,
     encryption_key: Vec<u8>,
-    chunk_size: usize,
+    //chunk_size: usize,
 }
 
 impl FileUploader {
@@ -40,7 +40,7 @@ impl FileUploader {
         }
 
         //let chunk_size = Self::get_chunk_size_from_file_size(file_size);
-        let chunk_size = CHUNK_READ_KB_LARGE;
+        //let chunk_size = CHUNK_READ_KB_LARGE;
         let encryption_key = encryption::generate_key();
         let current_file_md = FileMetadata {
             name: full_file_path
@@ -57,7 +57,7 @@ impl FileUploader {
             file_reader: TokioBufReader::new(file),
             file_metadata: current_file_md,
             encryption_key,
-            chunk_size,
+            //chunk_size,
         })
     }
 
@@ -75,29 +75,29 @@ impl FileUploader {
 
     pub async fn get_next_chunk(&mut self) -> Result<Option<Chunk>, ShardingError> {
         let file = &mut self.file_reader;
-        let mut buffer = vec![0; self.chunk_size];
+        let mut buffer = vec![0; CHUNK_READ_KB_LARGE];
         let bytes_read = file.read(&mut buffer).await?;
         if bytes_read == 0 {
             return Ok(None);
         }
         buffer.truncate(bytes_read);
 
-        if bytes_read < self.chunk_size {
+        if bytes_read < CHUNK_READ_KB_LARGE {
             // Add padding with random bytes
             let mut rng = rand::thread_rng();
-            let random_bytes: Vec<u8> = (0..self.chunk_size - bytes_read)
+            let random_bytes: Vec<u8> = (0..CHUNK_READ_KB_LARGE - bytes_read)
                 .map(|_| rng.random())
                 .collect();
             buffer.extend(&random_bytes);
         }
-        assert_eq!(buffer.len(), self.chunk_size);
+        assert_eq!(buffer.len(), CHUNK_READ_KB_LARGE);
 
         let (nonce, encrypted_chunk) = encryption::encrypt_payload(&buffer, &self.encryption_key)
             .map_err(|e| ShardingError::EncryptionFailed)?;
 
         let chunk = Chunk {
             data: encrypted_chunk.to_vec(),
-            hash: Hash::from_input(&encrypted_chunk),
+            hash: Hash::from_input(&buffer), // Hash of unencrypted chunk
             decrypted_data_unpadded_size: bytes_read, // Store real length in chunk
         };
 
