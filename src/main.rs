@@ -179,6 +179,13 @@ async fn main() {
                     println!(" - {}", contact);
                 }
             }
+            "dump_chunks" if parts.len() == 1 => {
+                let all_shards = node.get_owned_chunk_keys().await;
+                println!("Available chunks:");
+                for shard in all_shards {
+                    println!(" - {}", shard);
+                }
+            }
             _ => {
                 eprintln!(
                     "Wrong command or syntax '{}', should be 'dump_rt', 'find_node <key>', 'ping <key>', 'store <filepath>' or 'find_value <file_handle> <storage_dir>'",

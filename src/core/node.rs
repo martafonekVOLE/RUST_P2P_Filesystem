@@ -90,6 +90,16 @@ impl Node {
     }
 
     ///
+    /// Returns a vector of all chunks this node stores
+    ///
+    pub async fn get_owned_chunk_keys(&self) -> Vec<Key> {
+        self.shard_storage_manager
+            .read()
+            .await
+            .get_owned_chunk_keys()
+    }
+
+    ///
     /// Sends a request to the specified node ID and awaits the response.
     /// This method should always be used instead of calling send_request directly or manipulating
     /// the request map directly.
@@ -401,28 +411,21 @@ impl Node {
         response: Response,
         data: Vec<u8>,
     ) -> Result<()> {
-        match response.response_type {
-            ResponseType::PortOK { .. } => {
-                let addr: SocketAddr = response.sender.address;
-
-                // Attempt to connect with a timeout
-                let mut stream = timeout(
-                    Duration::from_millis(TCP_TIMEOUT_MILLISECONDS),
-                    TcpStream::connect(addr),
-                )
+        if let (ResponseType::PortOK { port }) = response.response_type {
+            let address =
+                response.sender.address.ip().to_string() + ":" + port.to_string().as_str();
+            let mut stream = TcpStream::connect(address)
                 .await
-                .with_context(|| format!("Connection to {} timed out", addr))?
-                .with_context(|| format!("Failed to connect to {}", addr))?;
+                .expect("Unable to connect to the TCP Stream.");
 
-                // Write the data to the stream.
-                stream
-                    .write_all(&data)
-                    .await
-                    .with_context(|| format!("Failed to send data to {}", addr))?;
+            stream
+                .write_all(data.as_slice())
+                .await
+                .expect("Unable to write data.");
 
-                Ok(())
-            }
-            _ => Err(anyhow!("Invalid response type: expected PortOK.")),
+            Ok(())
+        } else {
+            bail!("Unable to establish TCP stream.")
         }
     }
 
@@ -673,7 +676,7 @@ impl Node {
                 .download_chunk_from_storer(chunk_id, chunk_storer)
                 .await?;
             info!(
-                "Chunk {} downloaded (number {} from {})",
+                "Chunk n.1 {} downloaded (number {} from {})",
                 chunk_id,
                 i + 1,
                 chunk_data.len()
@@ -763,7 +766,7 @@ impl Node {
             }
 
             // Get the responses from all resolvers in this round
-            current_responses = self.lookup_round(target, resolvers, false).await;
+            current_responses = self.lookup_round(target, resolvers, true).await;
 
             // Record responses. If we didn't get any closer results, quit the rounds loop
             if !lookup_buffer.record_lookup_round_responses(current_responses.clone(), true) {

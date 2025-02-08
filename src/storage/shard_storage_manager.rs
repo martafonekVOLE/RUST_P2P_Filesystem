@@ -2,11 +2,9 @@ use crate::core::key::Key as Hash;
 use crate::networking::node_info::NodeInfo;
 use crate::sharding::common::{Chunk, CHUNK_SIZE_KB_LARGE, CHUNK_SIZE_KB_SMALL};
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
-use crate::utils::testing::to_unix_path;
 use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
@@ -171,6 +169,10 @@ impl ShardStorageManager {
             }
             None => Err(anyhow!("Chunk not found in storage")),
         }
+    }
+
+    pub fn get_owned_chunk_keys(&self) -> Vec<Hash> {
+        self.owned_chunks.keys().cloned().collect()
     }
 }
 
