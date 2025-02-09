@@ -1,6 +1,5 @@
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
-use log::error;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -29,6 +28,12 @@ pub struct DataTransfer {
 
 pub struct DataTransfersTable {
     transfers: HashMap<u16, DataTransfer>, // Maps port to sender info
+}
+
+impl Default for DataTransfersTable {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DataTransfersTable {

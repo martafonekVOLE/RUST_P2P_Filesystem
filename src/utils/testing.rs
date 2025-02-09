@@ -13,12 +13,11 @@ async fn create_test_file(
     let mut file = TokioFile::create(&file_path).await.unwrap();
     let mut rng = rand::thread_rng();
     if let Some(size) = maybe_size {
-        let bytes: Vec<u8>;
-        if randomly {
-            bytes = (0..size).map(|_| rng.random()).collect();
+        let bytes: Vec<u8> = if randomly {
+            (0..size).map(|_| rng.random()).collect()
         } else {
-            bytes = vec![0u8; size];
-        }
+            vec![0u8; size]
+        };
         file.write_all(&bytes).await.unwrap();
     }
     (file_path, dir)

@@ -3,10 +3,9 @@ use super::encryption;
 use crate::constants::{CHUNK_DATA_SIZE_KB, MAX_FILE_SIZE_MB};
 use crate::core::key::Key as Hash;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::fs::File as TokioFile;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader as TokioBufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader as TokioBufReader};
 
 pub struct FileUploader {
     file_reader: TokioBufReader<TokioFile>,
@@ -104,7 +103,7 @@ impl FileUploader {
 
         let (nonce, encrypted_chunk) =
             encryption::encrypt_payload(&byte_data_buffer, &self.encryption_key)
-                .map_err(|e| ShardingError::EncryptionFailed)?;
+                .map_err(|_| ShardingError::EncryptionFailed)?;
 
         let chunk = Chunk {
             data: encrypted_chunk.to_vec(),

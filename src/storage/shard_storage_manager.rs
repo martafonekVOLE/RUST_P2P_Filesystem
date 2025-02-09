@@ -75,7 +75,7 @@ impl ShardStorageManager {
 
                 self.data_transfers_table.remove(port);
 
-                file.write_all(&*data).await?;
+                file.write_all(&data).await?;
 
                 self.owned_chunks.insert(
                     chunk_hash,
@@ -111,7 +111,7 @@ impl ShardStorageManager {
             .filter(|(_, info)| {
                 info.time_stored_at.elapsed().unwrap().as_secs() >= self.expire_time_s
             })
-            .map(|(hash, _)| hash.clone())
+            .map(|(hash, _)| *hash)
             .collect();
 
         // Delete all dead chunks from drive
@@ -136,7 +136,7 @@ impl ShardStorageManager {
             .filter(|(_, info)| {
                 info.time_stored_at.elapsed().unwrap().as_secs() >= self.reupload_interval_s
             })
-            .map(|(hash, _)| hash.clone())
+            .map(|(hash, _)| *hash)
             .collect();
 
         Ok(reupload)
@@ -144,7 +144,7 @@ impl ShardStorageManager {
 
     /// Check if chunk is already owned.
     pub fn is_chunk_already_stored(&self, hash: &Hash) -> bool {
-        self.owned_chunks.get(hash).is_some()
+        self.owned_chunks.contains_key(hash)
     }
 
     pub fn add_active_tcp_connection(
@@ -161,7 +161,7 @@ impl ShardStorageManager {
     }
 
     pub fn update_chunk_upload_time(&mut self, hash: &Hash) -> Result<()> {
-        let mut chunk = self.owned_chunks.get_mut(hash);
+        let chunk = self.owned_chunks.get_mut(hash);
 
         match chunk {
             Some(chunk_info) => {

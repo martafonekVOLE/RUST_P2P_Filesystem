@@ -33,8 +33,6 @@ impl RoutingTable {
     // Must be 160
     pub const NUM_BUCKETS: usize = K * 8; // Key byte length * bits_per_byte
 
-    fn init(&mut self) {}
-
     pub fn new(id: Key) -> Self {
         RoutingTable {
             id,
@@ -56,6 +54,7 @@ impl RoutingTable {
         }
     }
 
+    #[allow(dead_code)] // TODO Remove?
     fn store_nodeinfo_limited(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
         let bucket_index = self.get_bucket_index(&node_info.id)?;
         if let Some(bucket) = self.buckets.get_mut(bucket_index) {
@@ -128,6 +127,7 @@ impl RoutingTable {
     }
 
     /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
+    #[allow(unused_assignments)]
     fn get_n_closest(&self, key: &Key, n: usize) -> Result<Vec<NodeInfo>, RoutingTableError> {
         /*
         Take all from bucket[i]

@@ -1,18 +1,16 @@
-use aes_gcm::aead::Error as AeadError;
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Key, Nonce,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-pub const AES_GCM_NONCE_SIZE: usize = 12; // bytes
 pub const AES_GCM_AUTH_TAG_SIZE_B: usize = 16; // auth tag appended at end of encrypted payload
                                                // ensures integrity and authenticity
 
 /// Encrypts data using AES-GCM
 pub fn encrypt_payload(payload: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let key = Key::<Aes256Gcm>::from_slice(key);
-    let cipher = Aes256Gcm::new(&key);
+    let cipher = Aes256Gcm::new(key);
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng); // 96-bits; unique per message
 
     // Encrypted message will be 16 bytes longer because of auth tag!
@@ -24,11 +22,7 @@ pub fn encrypt_payload(payload: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)>
 }
 
 /// Decrypts data using AES-GCM
-pub fn decrypt_payload(
-    encrypted_payload: &Vec<u8>,
-    key: &Vec<u8>,
-    nonce: &Vec<u8>,
-) -> Result<Vec<u8>> {
+pub fn decrypt_payload(encrypted_payload: &Vec<u8>, key: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let nonce = Nonce::from_slice(nonce);
     // Decrypted message will be 16 bytes shorter
@@ -48,6 +42,8 @@ mod tests {
     use rand::Rng;
 
     use super::*;
+
+    pub const AES_GCM_NONCE_SIZE: usize = 12; // bytes
 
     #[test]
     fn test_key_generation() {
@@ -82,7 +78,7 @@ mod tests {
         assert!(result.is_err());
         // Attempt to decrypt with a wrong nonce
         let mut rng = rand::thread_rng();
-        let index = rng.gen_index(0..AES_GCM_NONCE_SIZE);
+        let index = rng.gen_index(0..AES_GCM_NONCE_SIZE); // FIXME this constant is only used here, nowhere else in the actual code
         let mut modified_nonce = nonce.to_vec();
         modified_nonce[index] ^= rng.random::<u8>();
         let result = decrypt_payload(&ciphertext, &wrong_key, &modified_nonce);

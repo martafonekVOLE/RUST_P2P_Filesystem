@@ -14,6 +14,12 @@ pub struct FileManager {
     reupload_interval_s: u64,
 }
 
+impl Default for FileManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileManager {
     fn new_with_reupload_interval(reupload_interval_s: u64) -> FileManager {
         FileManager {

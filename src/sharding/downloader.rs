@@ -47,7 +47,7 @@ impl FileDownloader {
             &self.file_metadata.encryption_key,
             &chunk_metadata.nonce,
         )
-        .map_err(|e| ShardingError::DecryptionFailed)?;
+        .map_err(|_| ShardingError::DecryptionFailed)?;
 
         // let mut chunk_data: DecryptedChunkData = bincode::deserialize(&decrypted_chunk_bytes)
         //     .map_err(|_| ShardingError::DecryptionFailed)?;

@@ -19,7 +19,7 @@ impl Cache {
     pub fn parse_from_file(file_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let file = std::fs::File::open(file_path)?;
         let reader = std::io::BufReader::new(file);
-        let mut cache: Cache = serde_json::from_reader(reader)?;
+        let cache: Cache = serde_json::from_reader(reader)?;
 
         Ok(cache)
     }
