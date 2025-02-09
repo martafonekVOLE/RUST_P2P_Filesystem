@@ -1,0 +1,4 @@
+node_port: 8081
+cache_file_path: "cache.json"
+storage_path: "./storage-beacon"
+ip_address_type: "loopback" # "public" or "loopback" or "local"

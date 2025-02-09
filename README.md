@@ -1,93 +1,174 @@
-# Rust P2P
+# P2P Filesystem
+This project is an implementation of P2P filesystem using Kademlia.
+
+## How to configure
+This project can be configured using two config files, `config.yaml` and `config_beacon.yaml`. 
+
+### Config_beacon.yaml
+This file is a configuration file for a beacon node. Beacon node is a special type of node, which is the first one in the network and upon connectin does not go through joining procedure. User can specify several parameters.
+
+- **node_port**: User can specify a port on which the application is running on. If no port is provided, the applicationdoes use an unused port.
+- **cache_file_path**: Default path where cache is stored for a node.
+- **storage_path**: Default path where uploaded data is stored.
+- **ip_address_type**: Does specify a type of IP address. Possible fields are *[loopback, public, local]*.
+
+### Config.yaml
+This file is a configuration file for basic node. User can specify same parameters as in `config_beacon.yaml`, but there are two more parameters, which must be filled.
+
+- **beacon_node_address**: Ip address of the beacon node (node cannot join the network without it) in format *127.0.0.1:8081*.
+- **beacon_node_key**: Unique NodeID of the beacon node. This must be K bytes. 
 
 
+## How to run
 
-## Getting started
+### 1.  Start the initial beacon node:
+After the project is configured, network should be ready. First of all the **Beacon Node** must join the network. This step is vital in order to allow other nodes to join as well. In order to connect the Beacon Node, `--skip-join` flag is used. This means that the node does not try to fill its routing table by contacting other nodes. This flag should be omitted for all other nodes. 
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+```cargo run -- --config config_beacon.yaml --skip-join ```
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+> NOTE: You can alternatively add `-v` flag in order to see all important messages from the network communication.  
 
-## Add your files
+Expected output is: 
+```
+──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────
+Welcome to the network! Your node is 6eb76770415ac55f7ec5ccf52c91047d39ed38f4 @ 127.0.0.1:8081
+Available commands:
+ - ping <key>: Send a PING request to the specified node
+ - find_node <key>: Resolves 20 closest nodes to <key>
+ - upload <filepath>: Upload a file to the network
+ - download <file_handle> <storage_dir>: Download a file from the network
+ - dump_rt: Display the contents of the routing table
+ - dump_chunks: Display the chunks owned by this node
+ - Note: <key> should be a 40-character hexadecimal string
+──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────
+```
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+### 2. Update the config.yaml 
+As described in the [How to configure](#how-to-configure) section, user must update the `config.yaml` file with the beacon node's address and key.
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.fi.muni.cz/xkonopik/rust-p2p.git
-git branch -M main
-git push -uf origin main
+beacon_node_address: "127.0.0.1:8081"
+beacon_node_key: "6eb76770415ac55f7ec5ccf52c91047d39ed38f4"
+# node_port: 8081
+cache_file_path: "cache.json"
+storage_path: "./storage-node01"
+ip_address_type: "loopback" # "public" or "loopback" or "local"
+
 ```
 
-## Integrate with your tools
+### 3. Connect other nodes
+After the configuration is updated, user can add as many nodes as he wants. Basic nodes can join the network using following command. 
 
-- [ ] [Set up project integrations](https://gitlab.fi.muni.cz/xkonopik/rust-p2p/-/settings/integrations)
+```cargo run -- --config config.yaml ```
 
-## Collaborate with your team
+> NOTE: You can alternatively add `-v` flag in order to see all important messages from the network communication.  
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+> If you want to run multiple nodes from one machine please make sure that you update port and the cache and storage path for each of them.
+### Run options
 
-## Test and Deploy
+| header | header |
+| ------ | ------ |
+|   -c, --config `<CONFIG>`     |    Specify config file with node's configuration. Must be in YAML format.    |
+|    --cache `<CACHE>`    |    Path to the cached node file. This is used to relaunch stopped nodes.    |
+|    -v, --verbose    |    Log info about the ongoing communication to stdout. (Especially for debugging purposes)    |
+|    -s, --skip-join    |   Skip the join network procedure. Only use this flag when connection a Beacon Node.     |
+|     -p, --port `<PORT>`   |    The port which the node will run on. If not provided, a random port will be chosen. This overrides the port specified in the config file.    |
+|   -a, --automatic-storage     |   Creates the storage directory automatically based on the key of this node. Overrides the storage path specified in the config file.     |
+|    -h, --help    |   Print help     |
+|    -V, --version    |     Print version    |
 
-Use the built-in continuous integration in GitLab.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+## How to use the network
+If the network is running and there are nodes connected to it, user can execute some commands. Commands can be executed from all nodes via CLI.
 
-***
+#### Available commands:
+| Command | Parameters | Description |
+| ------ | ------ | ------ |
+|    **PING**    |    `key`: 40-character hexadecimal string    |    Send a PING request to the specified node    |
+|    **FIND_NODE**    |    `key`: 40-character hexadecimal string    |    Resolves 20 closest nodes to the `key`     |
+|    **UPLOAD**    |    `filepath`: valid path to file as string    |    Upload a file to the network    |
+|    **DOWNLOAD**    |    `file_handle`: file handle identifier as string, `storage_dir`: valid path to a directory     |    Download a file from the network    |
+|    **DUMP_RT**    |   --     |    Display the contents of the routing table    |
+|    **DUMP_CHUNKS**    |   --     |    Display the chunks owned by this node    |
 
-# Editing this README
+#### Usage
+Each command should be used like this:
+```command [params]```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Response will be displayed directly on the terminal window.
 
-## Suggestions for a good README
+**Example command**:  
+ ```upload file.txt```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+**Example response**:
+```Chunk successfully uploaded.
+File uploaded successfully!
+File handle: 080000000000000066696c652e74787420000000000000004871bda4d11162045726934d9324c2ab61bf0986fe21d48df2a84993fbc2d54201000000000000002800000000000000346462336534633566393039613965393066623866663434306563353639383263326265313536640c0000000000000097ca18e214ecf47a7f2581a1
+──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────
+```
+___
+___
 
-## Name
-Choose a self-explaining name for your project.
+# Theory 
+## Milestone 1:
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+### Theory, project description
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Each node that has successfully passed the initial setup will be able to send messages to other nodes. The messages
+will be of type `PING`, `STORE`, `FIND_NODE` and `FIND_VALUE`. For this milestone, we will only focus on the `PING`
+and `FIND_NODE` messages. The `PING` message is used to check if a node is still online and is issued only to nodes
+known by their actual IP and port. The `FIND_NODE` message is used to find a node in the network, given its Key.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Furthermore, we will have to implement a simple CLI for the node. This CLI will be able to start a node, check its
+status, kill it and disconnect it from the network.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+The hardest part of this milestone will be the actual network setup and the routing table population. We would be using
+the tokio for most operations on the networking side of things. An async-first approach must be taken, as we will be
+dealing with **a lot** of network operations as the node number increases.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+To ensure that the thing we will be building actually works, we will need to develop a sort of testing framework that
+will simulate the live network traffic on localhost. This will be used to test the network and the nodes in a controlled
+environment, so we can monitor the bottlenecks and failure points of the network before progressing to the next stage,
+where
+this framework will also be used.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### Goals outline for MS1
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+- Have a network of nodes that can ping each other
+- Be able to add a node to the network
+- Nodes manage their own routing tables
+- A node can be found only by its Key
+- Have a complete and tested communication interface with implement the `PING` and `FIND_NODE` messages.
+- Have a CLI that can start, check status, kill and disconnect nodes
+- Prepare a sort of testing/simulation framework to run nodes on localhost
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### Time plan and organization
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+A weekly online meeting should be held to discuss the progress and the next steps. The meeting should be held on the
+start of the weekend so that we have enough time to get something done with the new information from each other.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Since we only have a little over two months for this project, a 3-week sprint cycle should be adopted. This means that
+we will have 3 weeks to complete the tasks outlined above. After that, two more milestones will be created, each with
+their own 3-week sprint cycle - in the optimal case :D...
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+---
 
-## License
-For open source projects, say how it is licensed.
+---
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+## Milestone 2 :
+
+### Goals outline for MS2
+
+- Implement TCP data transfer
+- Have a complete and tested communication interface with implement the `STORE` and `FIND_VALUE` messages.
+- Implement a custom family of `STORE` messages. 
+- Setup active and passive data managers.
+- Introduce file sharding.
+- Introduce file shard encryption.
+- Follow the suggested communication outline
+
+### Time plan and organization
+An online meeting should be held twice a week to discuss the progress and the next
+steps. 
+
+Since we only have a little over two weeks for this project, we have set an internal deadline to **February 7th**.
