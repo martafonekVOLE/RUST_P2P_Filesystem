@@ -931,7 +931,8 @@ mod tests {
     #[tokio::test]
     async fn test_ping_response() -> Result<(), Box<dyn Error>> {
         let key = Key::new_random();
-        let node = Arc::new(Node::new(key, "127.0.0.1".to_string(), 8081, "/".to_string()).await?);
+
+        let node = Arc::new(Node::new(key, "127.0.0.1".to_string(), 38102, "/".to_string()).await?);
         let node_address = node.address;
 
         let node_clone = Arc::clone(&node);
