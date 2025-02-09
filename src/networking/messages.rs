@@ -24,7 +24,7 @@ pub type RequestId = Uuid;
 /// Request type enum
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum RequestType {
-    /// Ping message does check whether it is possible to establish connection with another node.
+    /// `Ping` does check whether it is possible to establish connection with another node.
     Ping,
     /// `FindNode` does try to find the closest nodes to the given node_id.
     FindNode { node_id: Key },
@@ -46,13 +46,16 @@ pub enum ResponseType {
     /// Nodes is a response type associated with FindNode request type. It does return a Vector of
     /// nodes which are closer to the requested one.
     Nodes { nodes: Vec<NodeInfo> },
-    /// StoreChunkUpdated is a response type associated with Store request type.
+    /// StoreChunkUpdated is a response type associated with Store request type. It does return an
+    /// information that requested chunk is already present.
     StoreChunkUpdated,
-    /// StoreOK is a response type associated with Store request type.
+    /// StoreOK is a response type associated with Store request type. It does return an information
+    /// that the sending node is available and ready to receive data.
     StoreOK,
-    /// PortOK is a response type associated with GetPort request type.
+    /// PortOK is a response type associated with GetPort request type. It does return a port.
     PortOK { port: u16 },
-    /// HasValue is a response type associated with GetValue request type.
+    /// HasValue is a response type associated with GetValue request type. It does return an
+    /// information that sending node has the requested chunk and is able to send it.
     HasValue { chunk_id: Key },
 }
 

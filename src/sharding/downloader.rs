@@ -18,8 +18,12 @@ impl FileDownloader {
         file_metadata: FileMetadata,
         output_dir: &Path,
     ) -> Result<Self, ShardingError> {
+        // Create output directory if it doesn't exist
+        tokio::fs::create_dir_all(output_dir).await?;
+
         let file_path = output_dir.join(&file_metadata.name);
         let file = TokioFile::create(&file_path).await?;
+
         Ok(FileDownloader {
             file_writer: TokioBufWriter::new(file),
             file_metadata,
