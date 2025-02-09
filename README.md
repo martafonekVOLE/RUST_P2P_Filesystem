@@ -1,16 +1,6 @@
 # P2P Filesystem
 This project is an implementation of P2P filesystem using Kademlia.
 
-**Contents**:
-
-- [How to configure](#How-to-configure) 
-- [How to run](#How-to-run)
-- [How to use](#How-to-use-the-network)
-
-- [Theory](#Theory)
-
-
-
 ## How to configure
 This project can be configured using two config files, `config.yaml` and `config_beacon.yaml`. 
 
