@@ -185,12 +185,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" - dump_chunks: Display the chunks owned by this node");
     println!(" - download_from_handle_file <file> <storage_dir>: Download a file from the network using a file containing the file handle");
     println!(
-        " NOTE: <key> should be a {}-character hexadecimal string",
+        "NOTE: <key> should be a {}-character hexadecimal string",
         K * 2
     );
     println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");
 
-    // Replace the synchronous stdin loop with an asynchronous one.
+    // Accept user commands.
     let stdin = BufReader::new(io::stdin());
     let mut lines = stdin.lines();
 
@@ -200,7 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        match parts[0] {
+        match parts[0].to_lowercase().as_str() {
             "ping" if parts.len() == 2 => match Key::from_hex_str(parts[1]) {
                 Ok(node_id) => match node.ping(node_id).await {
                     Ok(response) => println!("{} responded to PING: {}", parts[1], response),
