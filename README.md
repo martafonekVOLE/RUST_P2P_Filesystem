@@ -37,6 +37,7 @@ Available commands:
  - find_node <key>: Resolves 20 closest nodes to <key>
  - upload <filepath>: Upload a file to the network
  - download <file_handle> <storage_dir>: Download a file from the network
+ - download_from_handle_file <file> <storage_dir>: Download a file from the network using a file containing the file handle
  - dump_rt: Display the contents of the routing table
  - dump_chunks: Display the chunks owned by this node
  - Note: <key> should be a 40-character hexadecimal string
@@ -88,6 +89,7 @@ If the network is running and there are nodes connected to it, user can execute 
 |    **FIND_NODE**    |    `key`: 40-character hexadecimal string    |    Resolves 20 closest nodes to the `key`     |
 |    **UPLOAD**    |    `filepath`: valid path to file as string    |    Upload a file to the network    |
 |    **DOWNLOAD**    |    `file_handle`: file handle identifier as string, `storage_dir`: valid path to a directory     |    Download a file from the network    |
+|    **DOWNLOAD_FROM_HANDLE_FILE**    |   `file`: valid path to file, `storage_dir`: valid path to a directory     |    Download a file from the network (for large handles)    |
 |    **DUMP_RT**    |   --     |    Display the contents of the routing table    |
 |    **DUMP_CHUNKS**    |   --     |    Display the chunks owned by this node    |
 
