@@ -64,6 +64,19 @@ After the configuration is updated, user can add as many nodes as he wants. Basi
 > NOTE: You can alternatively add `-v` flag in order to see all important messages from the network communication.  
 
 > If you want to run multiple nodes from one machine please make sure that you update port and the cache and storage path for each of them.
+### Run options
+
+| header | header |
+| ------ | ------ |
+|   -c, --config `<CONFIG>`     |    Specify config file with node's configuration. Must be in YAML format.    |
+|    --cache `<CACHE>`    |    Path to the cached node file. This is used to relaunch stopped nodes.    |
+|    -v, --verbose    |    Log info about the ongoing communication to stdout. (Especially for debugging purposes)    |
+|    -s, --skip-join    |   Skip the join network procedure. Only use this flag when connection a Beacon Node.     |
+|     -p, --port `<PORT>`   |    The port which the node will run on. If not provided, a random port will be chosen. This overrides the port specified in the config file.    |
+|   -a, --automatic-storage     |   Creates the storage directory automatically based on the key of this node. Overrides the storage path specified in the config file.     |
+|    -h, --help    |   Print help     |
+|    -V, --version    |     Print version    |
+
 
 ## How to use the network
 If the network is running and there are nodes connected to it, user can execute some commands. Commands can be executed from all nodes via CLI.
