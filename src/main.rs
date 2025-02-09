@@ -183,8 +183,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" - download <file_handle> <storage_dir>: Download a file from the network");
     println!(" - dump_rt: Display the contents of the routing table");
     println!(" - dump_chunks: Display the chunks owned by this node");
+    println!(" - download_from_handle_file <file> <storage_dir>: Download a file from the network using a file containing the file handle");
     println!(
-        " - Note: <key> should be a {}-character hexadecimal string",
+        " NOTE: <key> should be a {}-character hexadecimal string",
         K * 2
     );
     println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");
@@ -288,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {
                 eprintln!(
-                    "Wrong command or syntax '{}'. Valid commands are: 'dump_rt', 'find_node <key>', 'ping <key>', 'upload <filepath>', 'download <file_handle> <storage_dir>' or 'dump_chunks'",
+                    "Wrong command or syntax '{}'. Valid commands are: 'dump_rt', 'find_node <key>', 'ping <key>', 'upload <filepath>', 'download <file_handle> <storage_dir>', 'download_from_handle_file <file> <storage_dir>' or 'dump_chunks' ",
                     parts[0]
                 );
             }
