@@ -28,7 +28,7 @@ pub async fn create_test_file_rng_filled(size: usize) -> (PathBuf, tempfile::Tem
 }
 
 pub async fn create_test_file_zero_filled(size: usize) -> (PathBuf, tempfile::TempDir) {
-    create_test_file(size.into(), true).await
+    create_test_file(size.into(), false).await
 }
 
 pub async fn create_test_file_empty() -> (PathBuf, tempfile::TempDir) {
