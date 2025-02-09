@@ -125,7 +125,7 @@ mod tests {
     async fn test_file_uploader_file_too_big() {
         let max_file_size_mb = 1;
         let (file_path, _dir) =
-            create_test_file_zero_filled(max_file_size_mb * 1024 * 1024 + 1).await;
+            create_test_file_rng_filled(max_file_size_mb * 1024 * 1024 + 1).await;
         let uploader =
             FileUploader::new_with_max_file_size(file_path.to_str().unwrap(), max_file_size_mb)
                 .await;
