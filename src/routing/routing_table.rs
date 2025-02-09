@@ -47,26 +47,22 @@ impl RoutingTable {
         node_info: NodeInfo,
         node: &Node,
     ) -> Result<(), RoutingTableError> {
-        let bucket_index = self.get_bucket_index(&node_info.get_id())?;
+        let bucket_index = self.get_bucket_index(&node_info.id)?;
         if let Some(bucket) = self.buckets.get_mut(bucket_index) {
             bucket.add_nodeinfo(node_info, node).await?;
             Ok(())
         } else {
-            Err(RoutingTableError::BucketNotFoundForId {
-                id: node_info.get_id(),
-            })
+            Err(RoutingTableError::BucketNotFoundForId { id: node_info.id })
         }
     }
 
     fn store_nodeinfo_limited(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
-        let bucket_index = self.get_bucket_index(&node_info.get_id())?;
+        let bucket_index = self.get_bucket_index(&node_info.id)?;
         if let Some(bucket) = self.buckets.get_mut(bucket_index) {
             bucket.add_nodeinfo_limited(node_info)?;
             Ok(())
         } else {
-            Err(RoutingTableError::BucketNotFoundForId {
-                id: node_info.get_id(),
-            })
+            Err(RoutingTableError::BucketNotFoundForId { id: node_info.id })
         }
     }
 
@@ -200,7 +196,7 @@ impl RoutingTable {
             return Err(RoutingTableError::Empty);
         }
 
-        result.sort_by_key(|node| node.get_id().distance(key));
+        result.sort_by_key(|node| node.id.distance(key));
         Ok(result.into_iter().take(n).collect())
     }
 
@@ -275,7 +271,7 @@ mod tests {
                 return Err(RoutingTableError::Empty);
             }
 
-            all_nodes.sort_by_key(|node| node.get_id().distance(key));
+            all_nodes.sort_by_key(|node| node.id.distance(key));
             Ok(all_nodes.into_iter().take(n).collect())
         }
 
@@ -361,9 +357,7 @@ mod tests {
             Ok(()) => (),
             Err(err) => eprintln!(
                 "Failed to store nodeinfo with key: {}. My key: {}. {}",
-                node_info.get_id(),
-                id,
-                err
+                node_info.id, id, err
             ),
         }
 
@@ -410,7 +404,7 @@ mod tests {
         let num_fetch = 3;
 
         let closest_nodes = routing_table
-            .get_n_closest_slow(&node1.get_id(), num_fetch)
+            .get_n_closest_slow(&node1.id, num_fetch)
             .unwrap();
         assert_eq!(closest_nodes.len(), num_fetch);
         assert!(closest_nodes.contains(&node1));
@@ -442,9 +436,7 @@ mod tests {
 
         let num_fetch = 3;
 
-        let closest_nodes = routing_table
-            .get_n_closest(&node1.get_id(), num_fetch)
-            .unwrap();
+        let closest_nodes = routing_table.get_n_closest(&node1.id, num_fetch).unwrap();
         assert_eq!(closest_nodes.len(), num_fetch);
         assert!(closest_nodes.contains(&node1));
         assert!(closest_nodes.contains(&node2));

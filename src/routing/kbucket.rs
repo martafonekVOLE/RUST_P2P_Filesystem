@@ -74,7 +74,7 @@ impl KBucket {
         }
 
         let head = self.nodes.remove(0).unwrap();
-        match this_node.ping(head.get_id()).await {
+        match this_node.ping(head.id).await {
             Ok(_) => {
                 self.nodes.push_back(head.clone()); // Move to tail (is not MRS)
                 Ok(())
@@ -201,7 +201,7 @@ mod tests {
             .address
             .set_port(rand::thread_rng().gen_range(1024..65535));
 
-        assert_eq!(&node1.get_id(), &node2.get_id());
+        assert_eq!(&node1.id, &node2.id);
 
         assert!(kbucket.add_nodeinfo_limited(node1.clone()).is_ok());
         assert!(kbucket.add_nodeinfo_limited(node2.clone()).is_ok());
