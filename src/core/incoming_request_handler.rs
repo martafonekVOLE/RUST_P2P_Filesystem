@@ -1,3 +1,4 @@
+use super::node::Node;
 use crate::core::key::Key;
 use crate::networking::message_dispatcher::MessageDispatcher;
 use crate::networking::messages::{Request, RequestType, Response, ResponseType};
@@ -5,17 +6,27 @@ use crate::networking::node_info::NodeInfo;
 use crate::networking::tcp_listener::TcpListenerService;
 use crate::routing::routing_table::RoutingTable;
 use crate::storage::shard_storage_manager::ShardStorageManager;
+use futures::future::err;
+use futures::FutureExt;
 use log::{error, info, warn};
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
+use tokio::time::timeout;
 
 const LOCALHOST: &str = "127.0.0.1:0";
-use super::node::Node;
 
 ///
-/// Handles incoming requests.
+/// # Router for handling incoming requests.
+///
+/// This method is the entry point for all incoming requests and is called from the main receive loop
+/// of the node. A new task for this method call should be spawned for each incoming request to
+/// handle it asynchronously.
+///
+/// This method also updates the routing table with the sender's information, which ensures that the
+/// node has the most up-to-date information about the nodes it communicates with.
 ///
 pub async fn handle_received_request(
     this_node: Arc<Node>,
@@ -52,23 +63,23 @@ pub async fn handle_received_request(
             )
             .await;
         }
-        RequestType::Store { chunk_id: file_id } => {
+        RequestType::Store { chunk_id } => {
             handle_store_message(
                 this_node_info,
                 request,
                 message_dispatcher,
                 shard_storage_manager,
-                file_id,
+                chunk_id,
             )
             .await;
         }
-        RequestType::GetPort { chunk_id: file_id } => {
+        RequestType::GetPort { chunk_id } => {
             handle_get_port_message(
                 this_node_info,
                 request,
                 message_dispatcher,
                 shard_storage_manager,
-                file_id,
+                chunk_id,
             )
             .await;
         }
@@ -90,8 +101,7 @@ pub async fn handle_received_request(
 }
 
 ///
-/// Handles PING requests.
-/// Sends a PONG response and updates the routing table with the sender.
+/// Handles `PING` requests by responding with a `PONG` message.
 ///
 async fn handle_ping_message(
     this_node_info: NodeInfo,
@@ -112,8 +122,9 @@ async fn handle_ping_message(
 }
 
 ///
-/// Handles FIND_NODE requests.
-/// Returns the K closest nodes to the requested `node_id`.
+/// Handles `FIND_NODE` requests.
+///
+/// Returns the `K` closest nodes to the requested `node_id`.
 ///
 async fn handle_find_node_message(
     this_node_info: NodeInfo,
@@ -145,7 +156,12 @@ async fn handle_find_node_message(
 }
 
 ///
+/// Handles `FIND_VALUE` requests.
+/// Returns the K closest nodes to the requested `key` when
+/// none of the nodes has direct access to a file with the
+/// same key or a single node which has the key.
 ///
+/// For single node, this returns `HAS_VALUE`.
 ///
 async fn handle_find_value_message(
     this_node_info: NodeInfo,
@@ -160,6 +176,8 @@ async fn handle_find_value_message(
         .await
         .is_chunk_already_stored(&target);
 
+    // If the chunk is not present in the storage, it behaves
+    // like response for FIND_NODE.
     if !chunk_exists {
         handle_find_node_message(
             this_node_info,
@@ -172,11 +190,11 @@ async fn handle_find_value_message(
         return;
     }
 
-    // Respond with a PONG message.
+    // Respond with a HAS_VALUE message.
     let response = Response::new(
         ResponseType::HasValue { chunk_id: target },
         this_node_info,         // Sender field
-        request.sender.clone(), // Receiver fiel
+        request.sender.clone(), // Receiver field
         request.request_id,
     );
 
@@ -186,6 +204,13 @@ async fn handle_find_value_message(
 }
 
 ///
+/// Handles `GET_VALUE` requests.
+/// Receiving that request type does instruct the node,
+/// that it will transfer some of its data to the
+/// requesting node.
+///
+/// Receiving node connects to a TCP stream and starts
+/// sending requested data.
 ///
 ///
 async fn handle_get_value(
@@ -224,8 +249,9 @@ async fn handle_get_value(
 }
 
 ///
-/// Handles STORE request
-/// Saves received chunk to the file system and adds entry to ShardManager's map
+/// Handles `STORE` request.
+///
+/// Saves received chunk to the file system and adds entry to `ShardStorageManager`'s map
 ///
 async fn handle_store_message(
     this_node_info: NodeInfo,
@@ -234,6 +260,8 @@ async fn handle_store_message(
     shard_storage_manager: Arc<RwLock<ShardStorageManager>>,
     file_id: Key,
 ) {
+    // Check first if chunk with this hash is already stored,
+    // in this case send response that chunk is already stored and just update TTL.
     let chunk_exists = shard_storage_manager
         .read()
         .await
@@ -265,10 +293,17 @@ async fn handle_store_message(
     };
 
     if let Err(e) = message_dispatcher.send_response(response).await {
-        error!("Failed to send STORE response: {}", e);
+        error!("Failed to send StoreOK response: {}", e);
     }
 }
 
+///
+/// Handles `GET_PORT` message.
+///
+/// This request type does instruct node to open a TCP Listener
+/// and provide the other node with port. The other node should
+/// send data over this TCP connection.
+///
 async fn handle_get_port_message(
     this_node_info: NodeInfo,
     request: Request,
@@ -298,6 +333,7 @@ async fn handle_get_port_message(
         return;
     }
 
+    // Respond with a PORT_OK message.
     let response = Response::new(
         ResponseType::PortOK { port },
         this_node_info,         // Sender field.
@@ -310,6 +346,7 @@ async fn handle_get_port_message(
         return;
     }
 
+    // Wait for TCP stream
     tokio::spawn(async move {
         match tcp_listener_service.receive_data().await {
             Ok(data) => handle_tcp_upload(data, port, &shard_storage_manager).await,
@@ -322,7 +359,8 @@ async fn handle_get_port_message(
 }
 
 ///
-/// Stores the received data to the storage.
+/// This method handles chunks, which were received over the established TCP connection.
+/// Chunks are stored using the `ShardStorageManager`.
 ///
 async fn handle_tcp_upload(
     data: Vec<u8>,
@@ -351,7 +389,6 @@ async fn record_possible_neighbour(
     node: &NodeInfo,
 ) {
     let mut routing_table = routing_table.write().await;
-    // routing_table.store_nodeinfo(node.clone()).unwrap();
     match routing_table
         .store_nodeinfo(node.clone(), this_node.as_ref())
         .await
