@@ -1,9 +1,9 @@
+use super::common::*;
+use super::encryption;
+use crate::constants::CHUNK_DATA_SIZE_KB;
 use std::path::{Path, PathBuf};
 use tokio::fs::File as TokioFile;
 use tokio::io::{AsyncWriteExt, BufWriter as TokioBufWriter};
-
-use super::common::*;
-use super::encryption;
 
 pub struct FileDownloader {
     file_writer: TokioBufWriter<TokioFile>,
@@ -52,7 +52,7 @@ impl FileDownloader {
         // let mut chunk_data: DecryptedChunkData = bincode::deserialize(&decrypted_chunk_bytes)
         //     .map_err(|_| ShardingError::DecryptionFailed)?;
 
-        let padded_chunk_size = CHUNK_READ_KB * 1024;
+        let padded_chunk_size = CHUNK_DATA_SIZE_KB * 1024;
         assert_eq!(decrypted_chunk_bytes.len(), padded_chunk_size + 4);
 
         let unpadded_data_size = u32::from_le_bytes(

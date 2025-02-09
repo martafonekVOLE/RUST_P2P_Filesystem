@@ -5,47 +5,49 @@ use sha1::{Digest, Sha1};
 use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::LowerHex;
+use thiserror::Error;
 
-/// Represents an error that can occur when constructing or parsing a Key.
-#[derive(Debug)]
+///
+/// Represents an error that can occur when constructing or parsing a `Key`.
+///
+#[derive(Debug, Error)]
 pub enum KeyError {
-    /// Decoded hex length is not as expected
+    #[error("Invalid length of decoded hex bytes: got {0}")]
     InvalidHexLength(usize),
-    /// Failed to decode hex for some reason
-    DecodeHexError(hex::FromHexError),
-    /// Hex string length is incorrect
+
+    #[error("Failed to decode hex: {0}")]
+    DecodeHexError(#[from] hex::FromHexError),
+
+    #[error("Hex string length must be {expected} but got {got}")]
     WrongHexStringLength { expected: usize, got: usize },
 }
 
-impl fmt::Display for KeyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            KeyError::InvalidHexLength(got) => {
-                write!(f, "Invalid length of decoded hex bytes: got {}", got)
-            }
-            KeyError::DecodeHexError(e) => {
-                write!(f, "Failed to decode hex: {}", e)
-            }
-            KeyError::WrongHexStringLength { expected, got } => {
-                write!(f, "Hex string length must be {} but got {}", expected, got)
-            }
-        }
-    }
-}
-
-impl std::error::Error for KeyError {}
-
-/// A fixed-size byte array for the key.
+///
+/// A fixed-size byte array for the key. The size is defined by the `K` constant - this comes from
+/// the Kademlia paper and is typically 20 bytes in production systems.
+///
 pub type KeyValue = [u8; K];
 
-/// A key representing a 160-bit identifier, suitable for Kademlia-like overlays.
+///
+/// # The main identifier of the Kademlia DHT
+///
+/// A key representing a 160-bit (with `K` = 20) identifier of either a node or a data chunk.
+/// This is the core type used in the Kademlia DHT. The file chunks and the nodes in the network
+/// share the same key space, which allows collisions between chunk and node, but collisions pairs
+/// of chunks or pairs of nodes are not allowed. Given a large enough key space, the probability of
+/// collisions is negligible.
+///
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct Key {
     value: KeyValue,
 }
 
 impl Key {
+    ///
     /// Generates a new random `Key` using thread-local RNG.
+    ///
+    /// Uses thread_rng which should provide good entropy for key generation.
+    ///
     pub fn new_random() -> Self {
         let mut rng = rand::thread_rng();
         let mut value: KeyValue = [0u8; K];
@@ -53,14 +55,22 @@ impl Key {
         Key { value }
     }
 
+    ///
     /// Constructs a `Key` from exactly 20 bytes (if `K` is 20).
+    ///
     /// This is a convenience function if you already have the bytes.
+    ///
     pub fn from_bytes(bytes: KeyValue) -> Self {
         Key { value: bytes }
     }
 
+    ///
     /// Creates a key from a hexadecimal string of length `2 * K` characters.
+    ///
+    /// This is useful for parsing keys from configuration files or other inputs.
+    ///
     /// Returns `KeyError` if the length or decoding is invalid.
+    ///
     pub fn from_hex_str(hex_str: &str) -> Result<Self, KeyError> {
         if hex_str.len() != K * 2 {
             return Err(KeyError::WrongHexStringLength {
@@ -82,8 +92,11 @@ impl Key {
         }
     }
 
+    ///
     /// Creates a `Key` by taking the SHA-1 hash of the given `input`.
+    ///
     /// Useful for generating a key from arbitrary data, e.g., a GUID or filename.
+    ///
     pub fn from_input(input: &[u8]) -> Self {
         let mut hasher = Sha1::new();
         hasher.update(input);
@@ -93,11 +106,18 @@ impl Key {
         Key { value }
     }
 
+    ///
+    /// Formats the key as a hexadecimal string.
+    ///
     pub fn to_hex_string(&self) -> String {
         format!("{:x}", self)
     }
 
+    ///
     /// Returns the XOR distance between `self` and `other` as a byte array.
+    ///
+    /// This is the main distance calculator distances in the key space.
+    ///
     pub fn distance(&self, other: &Key) -> KeyValue {
         let mut distance: KeyValue = [0u8; K];
         for (i, dist) in distance.iter_mut().enumerate() {
@@ -106,7 +126,11 @@ impl Key {
         distance
     }
 
+    ///
     /// Count the number of leading zeros in the XOR distance
+    ///
+    /// Helper for distance calculations in the routing table.
+    ///
     pub fn leading_zeros_in_distance(&self, other: &Key) -> usize {
         let distance = self.distance(other);
         let mut count = 0;
@@ -123,12 +147,9 @@ impl Key {
         count
     }
 
-    /// Returns a copy of the underlying 20-byte array as a `Vec<u8>`.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.value.to_vec()
-    }
-
+    ///
     /// For testing purposes in Routing Table
+    ///
     pub fn make_exactly_n_same_leading_bits_as(&mut self, key: &Key, mut n_bits: usize) {
         // Copy first n bits from
         let mut byte_i: usize = 0;
@@ -184,8 +205,10 @@ impl PartialOrd for Key {
     }
 }
 
-// Implementing LowerHex for Key allows us to use the `{:x}` format specifier, which outputs
-// the key as a lowercase hexadecimal string.
+///
+/// Implementing LowerHex for Key allows us to use the `{:x}` format specifier, which outputs
+/// the key as a lowercase hexadecimal string.
+///
 impl LowerHex for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for byte in &self.value {
@@ -195,8 +218,12 @@ impl LowerHex for Key {
     }
 }
 
-// Custom deserialization for Key
 impl<'de> Deserialize<'de> for Key {
+    ///
+    /// Custom deserializer for `Key` that reads a hex string and constructs a `Key`.
+    ///
+    /// This is used for deserializing keys from configuration files or human user inputs.
+    ///
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -207,6 +234,11 @@ impl<'de> Deserialize<'de> for Key {
 }
 
 impl Serialize for Key {
+    ///
+    /// Custom serializer for `Key` that writes the key as a hex string.
+    ///
+    /// This defines the look of the Key to the human users, we use hex strings for this.
+    ///
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -232,9 +264,9 @@ mod tests {
         let valid_hex = "f".repeat(hex_len); // Create a valid hex string dynamically
 
         let key = Key::from_hex_str(&valid_hex).expect("Should parse fine");
-        assert_eq!(key.to_bytes().len(), K);
+        assert_eq!(key.value.to_vec().len(), K);
         // Ensure it's all 0xFF
-        assert!(key.to_bytes().iter().all(|&b| b == 0xff));
+        assert!(key.value.to_vec().iter().all(|&b| b == 0xff));
     }
 
     #[test]
@@ -266,17 +298,22 @@ mod tests {
 
     #[test]
     fn test_from_input() {
+        use std::fmt::Write;
         let input = b"some data";
         let key = Key::from_input(input);
 
         let mut hasher = Sha1::new();
         hasher.update(input);
         let hash_result = hasher.finalize();
-        let expected_hex: String = hash_result
-            .iter()
-            .take(K)
-            .map(|b| format!("{:02x}", b))
-            .collect();
+
+        let expected_hex =
+            hash_result
+                .iter()
+                .take(K)
+                .fold(String::with_capacity(K * 2), |mut acc, &b| {
+                    write!(acc, "{:02x}", b).unwrap();
+                    acc
+                });
 
         assert_eq!(format!("{}", key), expected_hex);
     }

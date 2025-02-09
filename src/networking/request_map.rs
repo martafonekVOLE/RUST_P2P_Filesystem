@@ -19,6 +19,9 @@ pub struct RequestMap {
 }
 
 impl RequestMap {
+    ///
+    /// Default constructor.
+    ///
     pub fn new() -> Self {
         RequestMap {
             map: Arc::new(RwLock::new(HashMap::new())),
@@ -27,6 +30,7 @@ impl RequestMap {
 
     ///
     /// Adds a new request entry.
+    ///
     /// A thread has to pass in an oneshot sender to receive the response.
     /// The caller is responsible for ensuring that request IDs are unique.
     /// The caller is responsible for removing the request entry if it reaches some timeout and

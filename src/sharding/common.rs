@@ -1,4 +1,5 @@
 use super::encryption::AES_GCM_AUTH_TAG_SIZE_B;
+use crate::constants::CHUNK_DATA_SIZE_KB;
 use crate::core::key::Key as Hash;
 use anyhow::{Context, Result};
 use fmt::{Display, Formatter};
@@ -8,19 +9,10 @@ use std::io::{self};
 use std::str::FromStr;
 use thiserror::Error;
 
-// Actual size of the chunk will be longer
-// because of auth tag etc. on encyrpted message.
-// These constants just represent how much will be read from file to fill the chunk
-//pub const CHUNK_READ_KB_SMALL: usize = 512; // KB
-pub const CHUNK_READ_KB: usize = 1024; // KB
-
 //pub const CHUNK_SIZE_KB_SMALL: usize = CHUNK_READ_KB_SMALL + AES_GCM_AUTH_TAG_SIZE; // KB
 /// CHUNK_READ_KB * 1024 + 4 + AES_GCM_AUTH_TAG_SIZE_B
-pub const CHUNK_SIZE_B: usize = CHUNK_READ_KB * 1024 + 4 + AES_GCM_AUTH_TAG_SIZE_B; // BYTES
-
-pub const MAX_FILE_SIZE_MB: usize = 4096; // 4 GB
-
-//pub const LARGE_FILE_THRESHOLD_MB: usize = 1024; // 1 GB
+/// FIXME magic constant 4
+pub const CHUNK_SIZE_B: usize = CHUNK_DATA_SIZE_KB * 1024 + 4 + AES_GCM_AUTH_TAG_SIZE_B; // BYTES
 
 #[derive(Error, Debug)]
 pub enum ShardingError {

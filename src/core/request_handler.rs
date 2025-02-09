@@ -6,17 +6,11 @@ use crate::networking::node_info::NodeInfo;
 use crate::networking::tcp_listener::TcpListenerService;
 use crate::routing::routing_table::RoutingTable;
 use crate::storage::shard_storage_manager::ShardStorageManager;
-use futures::future::err;
-use futures::FutureExt;
 use log::{error, info, warn};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 use tokio::sync::RwLock;
-use tokio::time::timeout;
-
-const LOCALHOST: &str = "127.0.0.1:0";
 
 ///
 /// # Router for handling incoming requests.

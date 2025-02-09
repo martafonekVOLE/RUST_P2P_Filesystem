@@ -4,8 +4,11 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 
 ///
-/// NodeInfo struct contains `Key` and `SocketAddr` of a node in the network. This is used as a contact
-/// for the node.
+/// NodeInfo represents a "node contact". Contains the `Key` and `SocketAddr` which are used to
+/// uniquely identify and are necessary to communicate with a node.
+///
+/// Note: In case you send a request to a node knowing only its address, the node will refuse to
+/// respond unless you provide its actual `Key`. This is a security measure.
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct NodeInfo {
@@ -14,9 +17,6 @@ pub struct NodeInfo {
 }
 
 impl NodeInfo {
-    ///
-    /// Default constructor.
-    ///
     pub fn new(id: Key, address: SocketAddr) -> Self {
         NodeInfo { id, address }
     }

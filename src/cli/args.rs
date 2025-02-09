@@ -1,13 +1,13 @@
 use clap::{ArgGroup, Parser};
 
 #[derive(Parser, Debug)]
-#[clap(name = "Peer-to-peer System", version = "1.0.0", author = "TODO")]
+#[clap(name = "Peer-to-peer file sharing system", version = "1.0.0")]
 #[clap(group(
     ArgGroup::new("input")
         .required(true)
         .args(&["config", "cache"])
 ))]
-/// Peer-to-peer File Sharing System
+/// Peer-to-peer file sharing system written in Rust.
 pub struct Arguments {
     #[arg(short, long, required = true)]
     /// Config file with node's configuration. In YAML format.
@@ -35,23 +35,6 @@ pub struct Arguments {
     /// Overrides the storage path specified in the config file.
     pub automatic_storage: bool,
 }
-
-/*
-
-* - required
-^ - TRUE by default
-
-^   -c --config: Config file with node's configuration. In YAML format.
-        Contains:
-            - beacon_node address: ip+port
-            - node's port
-            - cache file path: where to dump node's config when it turns off
-            - storage path: where to store downloaded files
-    -b --beacon: Is it a beacon node? If so, beacon node's address is ignored if encountered in config file.
-    --cache: Use the cache logic. Dump config to cache file when turned off.
-    -v --verbose: Log info about the ongoing communication to stdout. (For debugging purposes)
-    -h --help: Print help message
- */
 
 #[cfg(test)]
 mod tests {

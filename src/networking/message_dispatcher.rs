@@ -1,4 +1,3 @@
-use crate::constants::K;
 use crate::networking::messages::{Request, Response, MAX_MESSAGE_SIZE};
 use anyhow::{bail, Context, Result};
 use log::info;
@@ -6,12 +5,22 @@ use serde_json;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 
+///
+/// Structure that should be used for sending messages to other nodes in the network.
+///
+/// Encapsulates a single UDP socket that is used for sending messages.
+///
+/// Note: This can be improved to use a pool of sockets for sending messages if the single socket
+/// becomes a bottleneck.
+///
 pub struct MessageDispatcher {
     socket: Mutex<UdpSocket>,
 }
 
 impl MessageDispatcher {
+    ///
     /// Creates a new MessageDispatcher with a single UDP socket.
+    ///
     pub async fn new() -> Result<Self> {
         let socket = UdpSocket::bind("0.0.0.0:0")
             .await
@@ -21,8 +30,10 @@ impl MessageDispatcher {
         })
     }
 
+    ///
     /// Sends a request using the single UDP socket.
-    /// Checks the serialized size against MAX_MESSAGE_SIZE before sending.
+    /// Checks the serialized size against `MAX_MESSAGE_SIZE` before sending.
+    ///
     pub async fn send_request(&self, request: Request) -> Result<usize> {
         if request.receiver == request.sender {
             bail!("Sender and receiver must not be the same (possible message to self)");
@@ -49,8 +60,10 @@ impl MessageDispatcher {
         Ok(len)
     }
 
+    ///
     /// Sends a response using the single UDP socket.
-    /// Checks the serialized size against MAX_MESSAGE_SIZE before sending.
+    /// Checks the serialized size against `MAX_MESSAGE_SIZE` before sending.
+    ///
     pub async fn send_response(&self, response: Response) -> Result<usize> {
         let serialized_response =
             serde_json::to_vec(&response).with_context(|| "Failed to serialize response type")?;

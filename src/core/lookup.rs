@@ -57,20 +57,6 @@ impl LookupNodeInfo {
     pub fn has_failed_to_respond(&self) -> bool {
         self.queried && !self.responded
     }
-
-    ///
-    /// Returns true if the node has responded during the lookup.
-    ///
-    pub fn has_responded(&self) -> bool {
-        self.queried && self.responded
-    }
-
-    ///
-    /// Returns true if the node has been queried during the lookup.
-    ///
-    pub fn has_been_queried(&self) -> bool {
-        self.queried
-    }
 }
 
 impl PartialEq for LookupNodeInfo {
@@ -85,7 +71,7 @@ impl PartialEq for LookupNodeInfo {
 /// This is used to determine the type of response in a lookup response. Can be either:
 /// - `Value`: The lookup has found the value.
 /// - `Nodes`: The lookup node has nod found a value requested in a value lookup, so it responds
-/// with the closest nodes it knows of. This implies that the queried node does not store the value.
+///     with the closest nodes it knows of. This implies that the queried node does not store the value.
 ///
 #[derive(Serialize, Deserialize, Clone)]
 pub enum LookupSuccessType {
@@ -98,8 +84,8 @@ pub enum LookupSuccessType {
 ///
 /// This is used to respond to a lookup request. The response can be either:
 /// - `Nodes`: The lookup has found nodes that are closer to the target, OR the node does not store the value
-/// during a value lookup, so it responds with the closest nodes it knows of. This is determined by
-/// the `success_type` field.
+///     during a value lookup, so it responds with the closest nodes it knows of. This is determined by
+///     the `success_type` field.
 /// - `Value`: The lookup has found the value.
 ///
 #[derive(Serialize, Deserialize, Clone)]
@@ -162,13 +148,6 @@ impl LookupResponse {
     }
 
     ///
-    /// Returns true if the lookup was successful.
-    ///
-    pub fn was_successful(&self) -> bool {
-        self.success
-    }
-
-    ///
     /// Returns the type of success for this lookup response.
     /// This can be either:
     /// `Value`: The lookup has found the value.
@@ -190,7 +169,7 @@ impl LookupResponse {
 /// This returns a bool signifying whether the lookup should continue.
 /// - For `find_value` lookups, the bool means 'was value found'
 /// - For `find_node` lookups, this signifies whether the list of closest nodes has been improved, e.g.
-/// 'did the results improve'.
+///     'did the results improve'.
 ///
 /// These results are necessary to control the Kademlia parallel iterative lookup algorithm.
 ///
@@ -304,9 +283,9 @@ impl LookupBuffer {
     /// # Arguments
     /// * `responses` - The responses from the nodes that were queried in the lookup iteration.
     /// * `for_value` - Whether the lookup is find_value or find_node type.
-    /// If this method is in a find_value lookup, it will return true if the value was found.
-    /// If this method is in a find_node lookup or the value was not found in the find_value lookup,
-    /// it will return true if the list of closest nodes has been improved.
+    ///     If this method is in a find_value lookup, it will return true if the value was found.
+    ///     If this method is in a find_node lookup or the value was not found in the find_value lookup,
+    ///     it will return true if the list of closest nodes has been improved.
     ///
     pub(crate) fn record_lookup_round_responses(
         &mut self,
@@ -357,17 +336,6 @@ impl LookupBuffer {
     }
 
     ///
-    /// Checks if there isn't a key collision for nodes in the buffer.
-    ///
-    fn check_node_key_uniqueness(&self, node: NodeInfo) -> bool {
-        self.nodes
-            .iter()
-            .filter(|n| (n.node_info.id == node.id) && (n.node_info.address != node.address))
-            .count()
-            == 0
-    }
-
-    ///
     /// Marks an input node given by key as queried.
     ///
     fn mark_node_as_queried(&mut self, node_id: Key) {
@@ -387,17 +355,6 @@ impl LookupBuffer {
                 node.responded = true;
             }
         }
-    }
-
-    ///
-    /// Get the nodes that have been queried but have not responded.
-    ///
-    fn get_unresponsive_nodes(&self) -> Vec<NodeInfo> {
-        self.nodes
-            .iter()
-            .filter(|node| node.queried && !node.responded)
-            .map(|node| node.node_info.clone())
-            .collect()
     }
 }
 
@@ -431,28 +388,11 @@ mod tests {
     }
 
     #[test]
-    fn test_lookup_node_info_flags() {
-        let mut lni = LookupNodeInfo::new(make_node_info("test_flags", 9000));
-        assert!(!lni.has_been_queried());
-        assert!(!lni.has_responded());
-        assert!(!lni.has_failed_to_respond());
-
-        lni.queried = true;
-        assert!(lni.has_been_queried());
-        assert!(!lni.has_responded());
-        assert!(lni.has_failed_to_respond());
-
-        lni.responded = true;
-        assert!(lni.has_responded());
-        assert!(!lni.has_failed_to_respond());
-    }
-
-    #[test]
     fn test_lookup_response_successful() {
         let resolver = make_node_info("resolver", 7000);
         let neighbors = vec![make_node_info("n1", 7001), make_node_info("n2", 7002)];
         let resp = LookupResponse::new_nodes_successful(resolver.clone(), neighbors.clone());
-        assert!(resp.was_successful());
+        assert!(resp.success);
         assert_eq!(resp.get_resolver(), resolver);
         assert_eq!(resp.get_k_closest(), neighbors);
     }
@@ -461,7 +401,7 @@ mod tests {
     fn test_lookup_response_failure() {
         let resolver = make_node_info("fail", 7003);
         let resp = LookupResponse::new_failed(resolver.clone());
-        assert!(!resp.was_successful());
+        assert!(!resp.success);
         assert_eq!(resp.get_resolver(), resolver);
         assert!(resp.get_k_closest().is_empty());
     }

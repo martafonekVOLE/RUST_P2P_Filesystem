@@ -1,20 +1,18 @@
+use crate::constants::{
+    DEFAULT_CHUNK_EXPIRE_TIME_S, DEFAULT_CHUNK_REUPLOAD_INTERVAL_S, MAX_DATA_STORED_MB,
+    MAX_SHARDS_STORED,
+};
 use crate::core::key::Key as Hash;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
-use crate::sharding::common::{Chunk, CHUNK_READ_KB, CHUNK_SIZE_B};
+use crate::sharding::common::CHUNK_SIZE_B;
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
 use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::SystemTime;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
-
-const MAX_SHARDS_STORED: usize = 1024;
-const MAX_DATA_STORED_MB: usize = 4096; // 4 GB
-
-const DEFAULT_CHUNK_REUPLOAD_INTERVAL_S: u64 = 3600; // 1 h
-const DEFAULT_CHUNK_EXPIRE_TIME_S: u64 = 86400; // 24 h
 
 pub struct StoredChunkInfo {
     pub time_stored_at: SystemTime,
@@ -195,6 +193,8 @@ impl ShardStorageManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sharding::common::Chunk;
+    use std::path::Path;
     use std::time::{Duration, SystemTime};
     use tempfile::tempdir;
 

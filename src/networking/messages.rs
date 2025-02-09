@@ -57,7 +57,12 @@ pub enum ResponseType {
 }
 
 impl ResponseType {
-    /// Builder for a Nodes response type.
+    ///
+    /// Builder for the Nodes response type. Takes the vector of K nodes and returns and constructs
+    /// a new ResponseType::Nodes from them.
+    ///
+    /// This is used for responding to FindNode requests.
+    ///
     pub fn new_nodes(nodes: Vec<NodeInfo>) -> Result<Self> {
         if nodes.len() > K {
             bail!("Nodes response contains more than K nodes");
@@ -67,7 +72,9 @@ impl ResponseType {
     }
 }
 
+///
 /// Request struct representing a request message.
+///
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Request {
     pub(crate) request_type: RequestType,
@@ -77,7 +84,9 @@ pub struct Request {
 }
 
 impl Request {
-    /// Creates a new Request.
+    ///
+    /// Default constructor for Request struct.
+    ///
     pub fn new(request_type: RequestType, sender: NodeInfo, receiver: NodeInfo) -> Self {
         Request {
             request_type,
@@ -88,7 +97,9 @@ impl Request {
     }
 }
 
-/// Response struct representing a response message.
+///
+/// Represents a response message.
+///
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct Response {
     pub(crate) response_type: ResponseType,
@@ -98,7 +109,9 @@ pub struct Response {
 }
 
 impl Response {
-    /// Creates a new Response.
+    ///
+    /// Default constructor for Response struct.
+    ///
     pub fn new(
         response_type: ResponseType,
         sender: NodeInfo,
@@ -165,14 +178,8 @@ impl Display for Request {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
     use std::mem::size_of;
     use std::net::SocketAddr;
-
-    // In these tests, we assume that `Key` has a `new_random()` method.
-    fn dummy_key() -> Key {
-        Key::new_random()
-    }
 
     /// Helper to create a dummy NodeInfo.
     /// The node gets a random key via `Key::new_random()` and an address derived from the given port.

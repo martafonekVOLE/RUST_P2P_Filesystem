@@ -1,18 +1,12 @@
+use super::common::*;
+use super::encryption;
+use crate::constants::{CHUNK_DATA_SIZE_KB, MAX_FILE_SIZE_MB};
 use crate::core::key::Key as Hash;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::{self, BufReader};
 use std::path::Path;
-use thiserror::Error;
 use tokio::fs::File as TokioFile;
-use tokio::io::{
-    AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader as TokioBufReader,
-    BufWriter as TokioBufWriter,
-};
-
-use super::common::*;
-use super::encryption;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 
 pub struct FileUploader {
     file_reader: TokioBufReader<TokioFile>,
@@ -75,7 +69,7 @@ impl FileUploader {
 
     pub async fn get_next_chunk_encrypt(&mut self) -> Result<Option<Chunk>, ShardingError> {
         let file = &mut self.file_reader;
-        let padded_size = CHUNK_READ_KB * 1024;
+        let padded_size = CHUNK_DATA_SIZE_KB * 1024;
         let mut byte_data_buffer = vec![0; padded_size];
         let bytes_read = file.read(&mut byte_data_buffer).await?;
         if bytes_read == 0 {
@@ -137,14 +131,8 @@ impl FileUploader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use tempfile::tempdir;
-    use tokio::fs::File as TokioFile;
-    use tokio::io::AsyncWriteExt;
 
-    use crate::utils::testing::{
-        create_test_file_empty, create_test_file_rng_filled, create_test_file_zero_filled,
-    };
+    use crate::utils::testing::{create_test_file_rng_filled, create_test_file_zero_filled};
 
     #[tokio::test]
     async fn test_file_uploader_new() {
