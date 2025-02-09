@@ -554,7 +554,7 @@ impl Node {
         let mut responsive_nodes = join_all(store_request_futures)
             .await
             .into_iter()
-            .filter_map(|res| res)
+            .flatten()
             .collect::<Vec<Response>>();
 
         if responsive_nodes.is_empty() {
@@ -568,7 +568,7 @@ impl Node {
         });
 
         // take ALPHA nodes with the smallest distance
-        Ok(responsive_nodes)
+        Ok(responsive_nodes.into_iter().take(ALPHA).collect())
     }
 
     ///
