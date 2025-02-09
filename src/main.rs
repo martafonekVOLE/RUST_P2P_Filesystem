@@ -184,7 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" - dump_rt: Display the contents of the routing table");
     println!(" - dump_chunks: Display the chunks owned by this node");
     println!(
-        " - Note: <key> should be a {}-character hexadecimal string",
+        "NOTE: <key> should be a {}-character hexadecimal string",
         K * 2
     );
     println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");
