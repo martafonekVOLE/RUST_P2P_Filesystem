@@ -275,6 +275,7 @@ mod tests {
             Ok(all_nodes.into_iter().take(n).collect())
         }
 
+        #[allow(dead_code)] // FIXME remove? its never used
         fn fill_with_random_nodes(&mut self, num_nodes: usize) {
             /*
             Will populate only several highest-index buckets,
@@ -446,7 +447,7 @@ mod tests {
     #[test]
     fn test_get_n_closest_empty() {
         let id = Key::new_random();
-        let mut routing_table = RoutingTable::new(id);
+        let routing_table = RoutingTable::new(id);
 
         let node_id = Key::new_random();
         let result = routing_table.get_n_closest(&node_id, 2);
