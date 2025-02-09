@@ -6,6 +6,7 @@ use crate::networking::node_info::NodeInfo;
 use crate::networking::tcp_listener::TcpListenerService;
 use crate::routing::routing_table::RoutingTable;
 use crate::storage::shard_storage_manager::ShardStorageManager;
+use crate::{development_info, development_info_with_separator};
 use log::{error, info, warn};
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -45,9 +46,15 @@ pub async fn handle_received_request(
 
     match request.request_type {
         RequestType::Ping => {
+            development_info!("Received PING from: [{}]", request.sender.id);
             handle_ping_message(this_node_info, request, message_dispatcher).await;
         }
         RequestType::FindNode { node_id } => {
+            development_info!(
+                "Received FIND_NODE ({}) from: [{}]",
+                node_id,
+                request.sender.id
+            );
             handle_find_node_message(
                 this_node_info,
                 request,
@@ -58,6 +65,11 @@ pub async fn handle_received_request(
             .await;
         }
         RequestType::Store { chunk_id } => {
+            development_info!(
+                "Received STORE ({}) from: [{}]",
+                chunk_id,
+                request.sender.id
+            );
             handle_store_message(
                 this_node_info,
                 request,
@@ -68,6 +80,11 @@ pub async fn handle_received_request(
             .await;
         }
         RequestType::GetPort { chunk_id } => {
+            development_info!(
+                "Received GET_PORT with chunk ID ({}) from: [{}]",
+                chunk_id,
+                request.sender.id
+            );
             handle_get_port_message(
                 this_node_info,
                 request,
@@ -78,6 +95,11 @@ pub async fn handle_received_request(
             .await;
         }
         RequestType::FindValue { chunk_id } => {
+            development_info!(
+                "Received FIND_VALUE ({}) from: [{}]",
+                chunk_id,
+                request.sender.id
+            );
             handle_find_value_message(
                 this_node_info,
                 request,
@@ -89,6 +111,12 @@ pub async fn handle_received_request(
             .await;
         }
         RequestType::GetValue { chunk_id, port } => {
+            development_info!(
+                "Received GET_VALUE ({}) with port ({}) for TCP data transfer from: [{}]",
+                chunk_id,
+                port,
+                request.sender.id
+            );
             handle_get_value(request, chunk_id, port, shard_storage_manager).await;
         }
     }
@@ -110,9 +138,11 @@ async fn handle_ping_message(
         request.request_id,
     );
 
-    if let Err(e) = message_dispatcher.send_response(response).await {
+    if let Err(e) = message_dispatcher.send_response(response.clone()).await {
         error!("Failed to send PONG response: {}", e);
     }
+
+    development_info_with_separator!("Successfully sent PONG to: [{}]", response.receiver.id);
 }
 
 ///
@@ -144,9 +174,11 @@ async fn handle_find_node_message(
         request.request_id,
     );
 
-    if let Err(e) = message_dispatcher.send_response(response).await {
+    if let Err(e) = message_dispatcher.send_response(response.clone()).await {
         error!("Failed to send FIND_NODE response: {}", e);
     }
+
+    development_info_with_separator!("Successfully sent NODES to: [{}]", response.receiver.id);
 }
 
 ///
@@ -192,9 +224,11 @@ async fn handle_find_value_message(
         request.request_id,
     );
 
-    if let Err(e) = message_dispatcher.send_response(response).await {
+    if let Err(e) = message_dispatcher.send_response(response.clone()).await {
         error!("Failed to send HAS_VALUE response: {}", e);
     }
+
+    development_info_with_separator!("Successfully sent HAS_VALUE to: [{}]", response.receiver.id);
 }
 
 ///
@@ -240,6 +274,11 @@ async fn handle_get_value(
     if let Err(e) = stream.write_all(data.as_slice()).await {
         error!("Unable to write data to TCP Stream at {}: {}", address, e);
     }
+
+    development_info_with_separator!(
+        "Successfully sent data over TCP to: [{}]",
+        request.sender.id
+    );
 }
 
 ///
@@ -286,9 +325,14 @@ async fn handle_store_message(
         )
     };
 
-    if let Err(e) = message_dispatcher.send_response(response).await {
+    if let Err(e) = message_dispatcher.send_response(response.clone()).await {
         error!("Failed to send StoreOK response: {}", e);
     }
+
+    development_info_with_separator!(
+        "Successfully sent STORE response to: [{}]",
+        response.receiver.id
+    );
 }
 
 ///
@@ -335,10 +379,16 @@ async fn handle_get_port_message(
         request.request_id,
     );
 
-    if let Err(e) = message_dispatcher.send_response(response).await {
+    if let Err(e) = message_dispatcher.send_response(response.clone()).await {
         error!("Failed to send PORT_OK response: {}", e);
         return;
     }
+
+    development_info!(
+        "Successfully sent PORT_OK ({}) to: [{}]",
+        port,
+        response.receiver.id
+    );
 
     // Wait for TCP stream
     tokio::spawn(async move {
@@ -371,7 +421,7 @@ async fn handle_tcp_upload(
         return;
     }
 
-    info!("Successfully stored the received data on port {}.", port);
+    development_info_with_separator!("Successfully stored the received data on port {}", port);
 }
 
 ///
