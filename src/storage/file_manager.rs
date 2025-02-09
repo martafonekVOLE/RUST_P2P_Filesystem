@@ -8,7 +8,7 @@ pub struct StoredFileInfo {
     pub time_uploaded: SystemTime,
 }
 
-/// Keeps map of uploaded files to reupload them every 24 hours
+/// Keeps map of uploaded files to reupload them every fixed amount of time.
 pub struct FileManager {
     uploaded_files: RwLock<HashMap<String, StoredFileInfo>>,
     reupload_interval_s: u64,

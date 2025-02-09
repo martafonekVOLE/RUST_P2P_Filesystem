@@ -1,4 +1,4 @@
-use super::encryption::AES_GCM_AUTH_TAG_SIZE_B;
+use super::encryption::{EncryptionError, AES_GCM_AUTH_TAG_SIZE_B};
 use crate::constants::CHUNK_DATA_SIZE_KB;
 use crate::core::key::Key as Hash;
 use anyhow::{Context, Result};
@@ -9,10 +9,10 @@ use std::io::{self};
 use std::str::FromStr;
 use thiserror::Error;
 
-//pub const CHUNK_SIZE_KB_SMALL: usize = CHUNK_READ_KB_SMALL + AES_GCM_AUTH_TAG_SIZE; // KB
-/// CHUNK_READ_KB * 1024 + 4 + AES_GCM_AUTH_TAG_SIZE_B
-/// FIXME magic constant 4
-pub const CHUNK_SIZE_B: usize = CHUNK_DATA_SIZE_KB * 1024 + 4 + AES_GCM_AUTH_TAG_SIZE_B; // BYTES
+pub const U32_SIZE_B: usize = 4;
+/// Total size of encrypted chunk
+pub const ENCRYPTED_CHUNK_SIZE_B: usize =
+    CHUNK_DATA_SIZE_KB * 1024 + U32_SIZE_B + AES_GCM_AUTH_TAG_SIZE_B;
 
 #[derive(Error, Debug)]
 pub enum ShardingError {
@@ -32,32 +32,34 @@ pub enum ShardingError {
     ChunkHashMismatch,
     #[error("Empty chunk")]
     EmptyChunk,
+    #[error("Chunk encryption failed")]
+    EncryptionError(#[from] EncryptionError),
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct DecryptedChunkData {
-    pub data_padded: Vec<u8>,
-    pub data_unpadded_size: u32,
-}
-
-/// Encrypted or decrypted chunk
+/// Encrypted or unencrypted chunk.
 #[derive(Clone)]
 pub struct Chunk {
-    pub data: Vec<u8>, // Size of chunk data is also stored here
-    pub hash: Hash,    // Hash of padded unencrypted chunk
-                       //pub decrypted_data_unpadded_size: usize, // Real size of decrypted without possible padding
+    /// Binary payload of chunk, includes padded byte array and size of unpadded data.
+    pub data: Vec<u8>,
+    /// Hash calculated from unencrypted padded data (that was read from file).
+    pub hash: Hash,
 }
 
+/// Metadata of chunk, stored in metadata file, used to download and decrypt the chunk.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChunkMetadata {
-    pub hash: Hash,     // Hash of padded unencrypted chunk
-    pub nonce: Vec<u8>, // Is required to decrypt the message. 12-byte long unique value.
+    /// Hash of padded unencrypted chunk binary data.
+    pub hash: Hash,
+    /// Is required to decrypt the message. 12-byte long unique value.
+    pub nonce: Vec<u8>,
 }
 
+/// Metadata, required to download a file.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileMetadata {
+    /// Name of the file.
     pub name: String,
-    pub size: usize, // E.g. to know which chunk size to expect
+    /// AEAD unique encryption key.
     pub encryption_key: Vec<u8>,
     pub chunks_metadata: Vec<ChunkMetadata>,
 }

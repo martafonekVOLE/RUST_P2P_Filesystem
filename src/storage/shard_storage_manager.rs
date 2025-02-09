@@ -5,25 +5,44 @@ use crate::constants::{
 use crate::core::key::Key as Hash;
 use crate::core::key::Key;
 use crate::networking::node_info::NodeInfo;
-use crate::sharding::common::CHUNK_SIZE_B;
+use crate::sharding::common::ENCRYPTED_CHUNK_SIZE_B;
 use crate::storage::data_transfers_table::{DataTransfer, DataTransfersTable};
-use anyhow::{anyhow, bail, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
+use thiserror::Error;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
+
+#[derive(Error, Debug)]
+pub enum ShardStorageError {
+    #[error("Max number of shards exceeded")]
+    MaxShardsExceeded,
+    #[error("Invalid chunk size")]
+    InvalidChunkSize,
+    #[error("Allocated storage memory exceeded. Can't store chunk")]
+    StorageMemoryExceeded,
+    #[error("Chunk is already stored. It was not necessary to download it!")]
+    ChunkAlreadyStored,
+    #[error("Data transfer not found for this port. Unable to save file.")]
+    DataTransferNotFound,
+    #[error("Chunk not found in storage")]
+    ChunkNotFound,
+    #[error("Failed to delete chunk from drive: {0}")]
+    ChunkDeletionFailed(String),
+    #[error("Chunk not found in storage")]
+    ChunkNotFoundInStorage,
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+}
+
+type Result<T> = std::result::Result<T, ShardStorageError>;
 
 pub struct StoredChunkInfo {
     pub time_stored_at: SystemTime,
 }
 
-impl StoredChunkInfo {
-    pub fn update_time(&mut self, time: SystemTime) {
-        self.time_stored_at = time;
-    }
-}
-
+/// Manages stored chunks.
 pub struct ShardStorageManager {
     storage_root_path: PathBuf,
     owned_chunks: HashMap<Hash, StoredChunkInfo>,
@@ -35,8 +54,6 @@ pub struct ShardStorageManager {
 
 impl ShardStorageManager {
     pub fn new(storage_root_path: PathBuf) -> ShardStorageManager {
-        // TODO: if storage_path is not empty, remove all contents?
-
         ShardStorageManager {
             storage_root_path,
             owned_chunks: HashMap::new(),
@@ -49,27 +66,28 @@ impl ShardStorageManager {
 
     /// Save chunk received by TCP
     pub async fn store_chunk_for_known_peer(&mut self, data: Vec<u8>, port: u16) -> Result<()> {
+        // Check if transfer was initiated on this port, to avoid accepting unwanted data.
         let data_transfer = self.data_transfers_table.get(port);
         let storage_root_path = self.storage_root_path.clone();
 
         match data_transfer {
             Some(data_transfer) => {
                 if self.owned_chunks.len() >= MAX_SHARDS_STORED {
-                    bail!("Max number of shards exceeded");
+                    return Err(ShardStorageError::MaxShardsExceeded);
                 }
                 let chunk_size = data.len();
 
-                if chunk_size > CHUNK_SIZE_B {
-                    bail!("Invalid chunk size");
+                if chunk_size > ENCRYPTED_CHUNK_SIZE_B {
+                    return Err(ShardStorageError::InvalidChunkSize);
                 }
                 if MAX_DATA_STORED_MB * 1024 - self.total_stored_kb < chunk_size {
-                    bail!("Allocated storage memory exceeded. Can't store chunk");
+                    return Err(ShardStorageError::StorageMemoryExceeded);
                 }
 
                 let chunk_hash = data_transfer.chunk_hash;
                 let chunk_full_path = storage_root_path.join(chunk_hash.to_string().as_str());
                 if chunk_full_path.exists() {
-                    bail!("Chunk is already stored. It was not necessary to download it!")
+                    return Err(ShardStorageError::ChunkAlreadyStored);
                 }
                 let mut file = File::create(chunk_full_path).await?;
 
@@ -85,7 +103,7 @@ impl ShardStorageManager {
                 );
             }
             None => {
-                bail!("Data transfer not found for this port. Unable to save file.");
+                return Err(ShardStorageError::DataTransferNotFound);
             }
         };
 
@@ -96,7 +114,7 @@ impl ShardStorageManager {
     pub async fn read_chunk(&self, chunk_hash: &Hash) -> Result<Vec<u8>> {
         let chunk_full_path = self.storage_root_path.join(chunk_hash.to_string());
         if !chunk_full_path.exists() {
-            bail!("Chunk not found in storage");
+            return Err(ShardStorageError::ChunkNotFound);
         }
 
         let data = fs::read(chunk_full_path).await?;
@@ -118,7 +136,7 @@ impl ShardStorageManager {
         for hash in &dead {
             let chunk_full_path = self.storage_root_path.join(hash.to_string());
             if let Err(e) = fs::remove_file(chunk_full_path).await {
-                bail!("Failed to delete chunk from drive: {}", e);
+                return Err(ShardStorageError::ChunkDeletionFailed(e.to_string()));
             }
         }
 
@@ -147,6 +165,7 @@ impl ShardStorageManager {
         self.owned_chunks.contains_key(hash)
     }
 
+    /// Add record of initiated transfer to later check when receiving chunk.
     pub fn add_active_tcp_connection(
         &mut self,
         port: u16,
@@ -165,10 +184,10 @@ impl ShardStorageManager {
 
         match chunk {
             Some(chunk_info) => {
-                chunk_info.update_time(SystemTime::now());
+                chunk_info.time_stored_at = SystemTime::now();
                 Ok(())
             }
-            None => Err(anyhow!("Chunk not found in storage")),
+            None => Err(ShardStorageError::ChunkNotFoundInStorage),
         }
     }
 
@@ -200,7 +219,7 @@ mod tests {
 
     fn create_test_chunk() -> Chunk {
         Chunk {
-            data: vec![0; CHUNK_SIZE_B],
+            data: vec![0; ENCRYPTED_CHUNK_SIZE_B],
             hash: Hash::new_random(),
         }
     }

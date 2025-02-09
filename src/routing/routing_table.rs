@@ -4,9 +4,9 @@ use crate::core::key::Key;
 use crate::core::node::Node;
 use crate::networking::node_info::NodeInfo;
 
-use thiserror::Error;
-
 use std::cmp::Ordering;
+
+use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum RoutingTableError {
@@ -24,6 +24,7 @@ pub enum RoutingTableError {
 
 const DEFAULT_BUCKET_REFRESH_INTERVAL_S: u64 = 3600; // 1 h
 
+/// Keeps k-buckets of the current node and provides API to access them.
 pub struct RoutingTable {
     id: Key,
     buckets: Vec<KBucket>,
@@ -54,17 +55,6 @@ impl RoutingTable {
         }
     }
 
-    #[allow(dead_code)] // TODO Remove?
-    fn store_nodeinfo_limited(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
-        let bucket_index = self.get_bucket_index(&node_info.id)?;
-        if let Some(bucket) = self.buckets.get_mut(bucket_index) {
-            bucket.add_nodeinfo_limited(node_info)?;
-            Ok(())
-        } else {
-            Err(RoutingTableError::BucketNotFoundForId { id: node_info.id })
-        }
-    }
-
     pub async fn store_nodeinfo_multiple(
         &mut self,
         node_infos: Vec<NodeInfo>,
@@ -81,12 +71,12 @@ impl RoutingTable {
         Ok(self.buckets[bucket_index].get_nodeinfo(key))
     }
 
-    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
+    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call `lookup_...` version instead
     pub fn get_alpha_closest(&self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
         self.get_n_closest(key, ALPHA)
     }
 
-    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
+    /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call `lookup_...` version instead
     pub fn get_k_closest(&self, key: &Key) -> Result<Vec<NodeInfo>, RoutingTableError> {
         self.get_n_closest(key, K)
     }
@@ -129,7 +119,7 @@ impl RoutingTable {
     /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
     #[allow(unused_assignments)]
     fn get_n_closest(&self, key: &Key, n: usize) -> Result<Vec<NodeInfo>, RoutingTableError> {
-        /*
+        /*!
         Take all from bucket[i]
         If closest bucket (i) does not contain enough:
             Append all from bucket[i+1]
@@ -142,7 +132,6 @@ impl RoutingTable {
             // cause buckets sort nodes based on proximity to current node, not to target node
             -> return
         */
-
         let mut result = Vec::new();
         let bucket_index_of_key = self.get_bucket_index(key)?;
 
@@ -200,7 +189,7 @@ impl RoutingTable {
         Ok(result.into_iter().take(n).collect())
     }
 
-    // Used for logging
+    /// Used for logging (dump_rt)
     pub fn get_all_nodeinfos(&self) -> Vec<NodeInfo> {
         let mut all_nodes = Vec::new();
         for bucket in &self.buckets {
@@ -218,13 +207,13 @@ impl RoutingTable {
         key
     }
 
-    /// Returns random ids for each bucket that was not a target of lookup for constant amount of time
+    /// Returns random ids for each bucket that was not a target of lookup for certain amount of time
     pub fn get_node_ids_for_refresh(&self) -> Vec<Key> {
         self.buckets
             .iter()
             .enumerate()
             .filter_map(|(index, bucket)| {
-                if bucket.last_lookup_at.elapsed().unwrap().as_secs()
+                if bucket.get_last_lookup().elapsed().unwrap().as_secs()
                     >= DEFAULT_BUCKET_REFRESH_INTERVAL_S
                 {
                     Some(index)
@@ -275,21 +264,19 @@ mod tests {
             Ok(all_nodes.into_iter().take(n).collect())
         }
 
-        #[allow(dead_code)] // FIXME remove? its never used
-        fn fill_with_random_nodes(&mut self, num_nodes: usize) {
-            /*
-            Will populate only several highest-index buckets,
-            since probability of hitting low distance is exponentially low.
-            Not good for testing purposes.
-            */
-            for _ in 0..num_nodes {
-                let node = NodeInfo::new_local(Key::new_random());
-                self.store_nodeinfo_limited(node).unwrap_or_default();
+        fn store_nodeinfo_limited(&mut self, node_info: NodeInfo) -> Result<(), RoutingTableError> {
+            let bucket_index = self.get_bucket_index(&node_info.id)?;
+            if let Some(bucket) = self.buckets.get_mut(bucket_index) {
+                bucket.add_nodeinfo_limited(node_info)?;
+                Ok(())
+            } else {
+                Err(RoutingTableError::BucketNotFoundForId { id: node_info.id })
             }
         }
 
+        /// Fill all buckets with `num_nodes_per_bucket` nodeinfos with random keys.
         fn fill_buckets_random_uniform(&mut self, num_nodes_per_bucket: usize) {
-            /*
+            /*!
             for each bucket in reverse:
                 lz = increase num leading zeroes
                 populate bucket with random keys:
@@ -297,7 +284,7 @@ mod tests {
                     set first lz bits to equal first lz bits of self.id
                     add node to bucket
 
-             */
+            */
             for (lz, bucket) in self.buckets.iter_mut().rev().enumerate() {
                 for _ in 0..num_nodes_per_bucket {
                     let mut key = Key::new_random();
@@ -311,7 +298,7 @@ mod tests {
                 }
             }
         }
-    }
+    } // impl RoutingTable
 
     fn get_n_closest_fuzz(n: usize, nodes_per_bucket: usize) -> bool {
         let id = Key::new_random();
