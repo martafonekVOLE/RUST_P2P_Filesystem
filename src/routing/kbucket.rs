@@ -10,42 +10,24 @@ use thiserror::Error;
 #[derive(Error, Debug, PartialEq)]
 pub enum KBucketError {
     #[error("Not enough space in K-bucket")]
-    NotEnoughSpace, // TODO: not needed
+    NotEnoughSpace, // Only used in tests
     #[error("Failed to add nodeinfo")]
     FailedToAdd,
 }
 
+/// Keeps nodeinfo entries to record nodes that are known as part of routing.
+/// K-bucket `i` keeps nodes which distance from this node has `i` leading zeroes.
+/// Distance is calculated as XOR of node IDs.
 #[derive(Clone)]
 pub struct KBucket {
+    /// Nodes are kept sorted by Most-Recently-Seen metric from tail to head
+    /// Sorting order is updated only on `add_nodeinfo`
     nodes: VecDeque<NodeInfo>,
     capacity: usize,
-    pub last_lookup_at: SystemTime,
-    /*
-    TODO: channel for communication with sender
-    */
+    /// Time when last lookup for this k-bucket happened.
+    /// Used for periodic k-bucket refresh mechanism
+    last_lookup_at: SystemTime,
 }
-
-/*
-Nodes are kept sorted by last-seen metric
- */
-
-/*
-Add node:
-
-    if already exists:
-        move to tail (is most rec. seen)
-    ->  return
-
-    if enough space in k-bucket:
-        Insert
-    else:
-        Ping node at head (least rec. seen)
-        if replies:
-            Discard new node (don't insert)
-        else:
-            Discard the pinged node
-            Insert new at tail (is now most rec. seen)
- */
 
 impl KBucket {
     pub fn new() -> Self {
@@ -60,6 +42,13 @@ impl KBucket {
         self.last_lookup_at = SystemTime::now();
     }
 
+    pub fn get_last_lookup(&self) -> SystemTime {
+        self.last_lookup_at
+    }
+
+    /// Add new nodeinfo to k-bucket. If exists, remove and push back, meaning its Most-Recently-Seen.
+    /// If no space left, ping node at head (LRS), if replies keep old node, do not add new one.
+    /// Otherwise remove old node, add new one to tail (is MRS).
     pub async fn add_nodeinfo(
         &mut self,
         node_info_new: NodeInfo,
@@ -76,7 +65,7 @@ impl KBucket {
         let head = self.nodes.remove(0).unwrap();
         match this_node.ping(head.id).await {
             Ok(_) => {
-                self.nodes.push_back(head.clone()); // Move to tail (is not MRS)
+                self.nodes.push_back(head.clone()); // Move to tail (is now MRS)
                 Ok(())
             }
             Err(NodeError::ResponseTimeout) | Err(NodeError::BadResponse) => {
@@ -86,32 +75,6 @@ impl KBucket {
             // If ping failed for reasons other than no response, return error
             Err(_) => Err(KBucketError::FailedToAdd),
         }
-
-        /*  TODO:
-        ping node from head (least rec. seen):
-            Send request to channel
-            Wait for response from channel
-
-        if replies:
-            Discard new node (don't insert)
-            -> return false
-        else:
-            Discard the pinged node
-            Insert new at tail (is now most rec. seen)
-            -> return true
-        */
-    }
-
-    pub fn add_nodeinfo_limited(&mut self, node_info: NodeInfo) -> Result<(), KBucketError> {
-        // Remove if exists
-        self.remove_nodeinfo(&node_info.id);
-
-        if self.nodes.len() < self.capacity {
-            self.nodes.push_back(node_info);
-            return Ok(());
-        }
-
-        Err(KBucketError::NotEnoughSpace)
     }
 
     pub fn remove_nodeinfo(&mut self, key: &Key) -> Option<NodeInfo> {
@@ -131,17 +94,27 @@ impl KBucket {
     }
 }
 
-impl Default for KBucket {
-    fn default() -> Self {
-        KBucket::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use rand::Rng;
     use std::net::{Ipv4Addr, SocketAddr};
+
+    impl KBucket {
+        /// Same as `add_nodeinfo` but if bucket is full do not ping, just throw error.
+        /// Used in unit tests.
+        pub fn add_nodeinfo_limited(&mut self, node_info: NodeInfo) -> Result<(), KBucketError> {
+            // Remove if exists
+            self.remove_nodeinfo(&node_info.id);
+
+            if self.nodes.len() < self.capacity {
+                self.nodes.push_back(node_info);
+                return Ok(());
+            }
+
+            Err(KBucketError::NotEnoughSpace)
+        }
+    }
 
     fn create_local_node() -> NodeInfo {
         let id = Key::new_random();

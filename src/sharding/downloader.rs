@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs::File as TokioFile;
 use tokio::io::{AsyncWriteExt, BufWriter as TokioBufWriter};
 
+/// Used to assemble the file from chunks one by one and stored it in the file system.
 pub struct FileDownloader {
     file_writer: TokioBufWriter<TokioFile>,
     file_metadata: FileMetadata,
@@ -27,9 +28,7 @@ impl FileDownloader {
         })
     }
 
-    /// TODO
-    ///
-    /// * `chunk_data` - byte slice containing padded chunk data and size of unpadded data
+    /// Decrypt and store the chunk.
     pub async fn store_next_chunk_decrypt(&mut self, chunk: Chunk) -> Result<(), ShardingError> {
         // Check if chunk.data is empty
         if chunk.data.is_empty() {
@@ -46,14 +45,10 @@ impl FileDownloader {
             &chunk.data,
             &self.file_metadata.encryption_key,
             &chunk_metadata.nonce,
-        )
-        .map_err(|_| ShardingError::DecryptionFailed)?;
-
-        // let mut chunk_data: DecryptedChunkData = bincode::deserialize(&decrypted_chunk_bytes)
-        //     .map_err(|_| ShardingError::DecryptionFailed)?;
+        )?;
 
         let padded_chunk_size = CHUNK_DATA_SIZE_KB * 1024;
-        assert_eq!(decrypted_chunk_bytes.len(), padded_chunk_size + 4);
+        debug_assert_eq!(decrypted_chunk_bytes.len(), padded_chunk_size + 4);
 
         let unpadded_data_size = u32::from_le_bytes(
             decrypted_chunk_bytes[padded_chunk_size..padded_chunk_size + 4]

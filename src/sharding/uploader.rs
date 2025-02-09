@@ -41,7 +41,6 @@ impl FileUploader {
                 .unwrap()
                 .to_string_lossy()
                 .to_string(),
-            size: file_size,
             encryption_key: encryption_key.to_vec(),
             chunks_metadata: Vec::new(),
         };
@@ -69,12 +68,12 @@ impl FileUploader {
     pub async fn get_next_chunk_encrypt(&mut self) -> Result<Option<Chunk>, ShardingError> {
         let file = &mut self.file_reader;
         let padded_size = CHUNK_DATA_SIZE_KB * 1024;
-        let mut byte_data_buffer = vec![0; padded_size];
-        let bytes_read = file.read(&mut byte_data_buffer).await?;
+        let mut padded_data_buffer = vec![0; padded_size];
+        let bytes_read = file.read(&mut padded_data_buffer).await?;
         if bytes_read == 0 {
             return Ok(None);
         }
-        byte_data_buffer.truncate(bytes_read);
+        padded_data_buffer.truncate(bytes_read);
 
         if bytes_read < padded_size {
             // Add padding with random bytes
@@ -82,28 +81,18 @@ impl FileUploader {
             let random_bytes: Vec<u8> = (0..padded_size - bytes_read)
                 .map(|_| rng.random())
                 .collect();
-            byte_data_buffer.extend(&random_bytes);
+            padded_data_buffer.extend(&random_bytes);
         }
-        assert_eq!(byte_data_buffer.len(), padded_size);
+        debug_assert_eq!(padded_data_buffer.len(), padded_size);
 
-        let bytes_read_u32: u32 = bytes_read as u32;
+        let unpadded_size_bytes = (bytes_read as u32).to_le_bytes();
+        debug_assert_eq!(unpadded_size_bytes.len(), 4);
 
-        let unpadded_size_bytes = bytes_read_u32.to_le_bytes();
-        assert_eq!(unpadded_size_bytes.len(), 4);
-
-        // let chunk_data = DecryptedChunkData {
-        //     data_padded: byte_data_buffer,
-        //     data_unpadded_size: bytes_read as u32,
-        // };
-
-        //let data_bytes = bincode::serialize(&chunk_data).unwrap();
-
-        let chunk_hash = Hash::from_input(&byte_data_buffer);
-        byte_data_buffer.extend_from_slice(&unpadded_size_bytes);
+        let chunk_hash = Hash::from_input(&padded_data_buffer);
+        padded_data_buffer.extend_from_slice(&unpadded_size_bytes);
 
         let (nonce, encrypted_chunk) =
-            encryption::encrypt_payload(&byte_data_buffer, &self.encryption_key)
-                .map_err(|_| ShardingError::EncryptionFailed)?;
+            encryption::encrypt_payload(&padded_data_buffer, &self.encryption_key)?;
 
         let chunk = Chunk {
             data: encrypted_chunk.to_vec(),
@@ -171,7 +160,7 @@ mod tests {
         assert!(chunk.is_some(), "Expected Some(chunk), got None");
         assert_eq!(
             chunk.unwrap().data.len(),
-            CHUNK_SIZE_B,
+            ENCRYPTED_CHUNK_SIZE_B,
             "Chunk length mismatch"
         );
 

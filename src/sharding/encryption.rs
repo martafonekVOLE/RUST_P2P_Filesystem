@@ -2,12 +2,21 @@ use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Key, Nonce,
 };
-use anyhow::Result;
+use thiserror::Error;
 
-pub const AES_GCM_AUTH_TAG_SIZE_B: usize = 16; // auth tag appended at end of encrypted payload
-                                               // ensures integrity and authenticity
+// Define custom error type
+#[derive(Error, Debug)]
+pub enum EncryptionError {
+    #[error("Encryption error: {0}")]
+    Encryption(String),
+}
 
-/// Encrypts data using AES-GCM
+pub type Result<T> = std::result::Result<T, EncryptionError>;
+
+/// Auth tag appended at the end of encrypted payload. Ensures integrity and authenticity.
+pub const AES_GCM_AUTH_TAG_SIZE_B: usize = 16;
+
+/// Encrypts data using AES-GCM.
 pub fn encrypt_payload(payload: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let key = Key::<Aes256Gcm>::from_slice(key);
     let cipher = Aes256Gcm::new(key);
@@ -16,19 +25,19 @@ pub fn encrypt_payload(payload: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)>
     // Encrypted message will be 16 bytes longer because of auth tag!
     let encrypted_payload = cipher
         .encrypt(&nonce, payload)
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .map_err(|e| EncryptionError::Encryption(e.to_string()))?;
 
     Ok((nonce.to_vec(), encrypted_payload.to_vec())) // Store nonce + ciphertext
 }
 
-/// Decrypts data using AES-GCM
+/// Decrypts data using AES-GCM.
 pub fn decrypt_payload(encrypted_payload: &Vec<u8>, key: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let nonce = Nonce::from_slice(nonce);
     // Decrypted message will be 16 bytes shorter
     let decrypted_payload = cipher
         .decrypt(nonce, encrypted_payload.as_slice())
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .map_err(|e| EncryptionError::Encryption(e.to_string()))?;
 
     Ok(decrypted_payload)
 }
@@ -43,7 +52,7 @@ mod tests {
 
     use super::*;
 
-    pub const AES_GCM_NONCE_SIZE: usize = 12; // bytes
+    pub const AES_GCM_NONCE_SIZE_B: usize = 12;
 
     #[test]
     fn test_key_generation() {
@@ -78,7 +87,7 @@ mod tests {
         assert!(result.is_err());
         // Attempt to decrypt with a wrong nonce
         let mut rng = rand::thread_rng();
-        let index = rng.gen_index(0..AES_GCM_NONCE_SIZE); // FIXME this constant is only used here, nowhere else in the actual code
+        let index = rng.gen_index(0..AES_GCM_NONCE_SIZE_B); // FIXME this constant is only used here, nowhere else in the actual code
         let mut modified_nonce = nonce.to_vec();
         modified_nonce[index] ^= rng.random::<u8>();
         let result = decrypt_payload(&ciphertext, &wrong_key, &modified_nonce);
