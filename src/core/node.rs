@@ -1,5 +1,5 @@
-use crate::constants::PING_TIMEOUT_MILLISECONDS;
 use crate::constants::{ALPHA, LOOKUP_TIMEOUT_MILLISECONDS};
+use crate::constants::{BASIC_REQUEST_TIMEOUT_MILLISECONDS, RECEIVE_WORKER_TASK_COUNT};
 use crate::core::key::Key;
 use crate::core::lookup::{LookupBuffer, LookupResponse, LookupSuccessType};
 use crate::core::request_handler::handle_received_request;
@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket as TokioUdpSocket};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tokio::task;
 
 use anyhow::{bail, Context, Result};
@@ -126,7 +126,7 @@ impl Node {
 
     ///
     /// Creates a listening task that indefinitely waits for incoming messages on this node's socket.
-    /// Incoming messages are parsed and dispatched to the appropriate handler.
+    /// Incoming messages are enqueued into a bounded channel and processed by a fixed pool of workers.
     ///
     /// This must be called after the node is initialized, otherwise the node won't be able to receive
     /// any messages.
@@ -134,64 +134,95 @@ impl Node {
     /// This method is non-blocking and runs in the background.
     ///
     pub fn start_listening(self: Arc<Self>) {
-        // Load references to the fields of the Node struct
+        // Clone the necessary shared resources.
         let socket = Arc::clone(&self.socket);
         let routing_table = Arc::clone(&self.routing_table);
         let request_map = self.request_map.clone();
         let message_dispatcher = Arc::clone(&self.message_dispatcher);
-        let shard_manager = Arc::clone(&self.shard_storage_manager);
+        let shard_storage_manager = Arc::clone(&self.shard_storage_manager);
         let this_node_info = self.to_node_info();
+        let node_clone = self.clone();
 
-        // Spawn an indefinitely looping async task to listen for incoming messages
-        task::spawn(async move {
-            let mut buffer = [0; MAX_MESSAGE_SIZE];
-            loop {
-                match socket.recv_from(&mut buffer).await {
-                    Ok((size, src)) => {
-                        //bp here
-                        let data = &buffer[..size];
+        // Define the capacity of the incoming message queue.
+        const QUEUE_CAPACITY: usize = 100;
 
-                        // Response
-                        if let Ok(response) = serde_json::from_slice::<Response>(data) {
-                            let request_map = request_map.clone();
-                            task::spawn(async move {
-                                // Use the map to send the response into the corresponding oneshot
-                                // Unknown requests IDs are filtered out by this method
-                                request_map.handle_response(response).await;
-                            });
+        // Create a bounded MPSC channel for incoming messages.
+        // Each message is a tuple: (data: Vec<u8>, source: SocketAddr).
+        let (tx, rx) = mpsc::channel::<(Vec<u8>, SocketAddr)>(QUEUE_CAPACITY);
 
-                        // Request
-                        } else if let Ok(request) = serde_json::from_slice::<Request>(data) {
-                            let routing_table = Arc::clone(&routing_table);
-                            let message_dispatcher = Arc::clone(&message_dispatcher);
-                            let shard_manager = Arc::clone(&shard_manager);
-                            let this_node_info = this_node_info.clone();
-                            let this = self.clone();
-                            task::spawn(async move {
-                                handle_received_request(
-                                    this,
-                                    this_node_info,
-                                    request,
-                                    routing_table,
-                                    message_dispatcher,
-                                    shard_manager,
-                                )
-                                .await;
-                            });
+        // Wrap the receiver in an Arc<Mutex<>> so that multiple worker tasks can share it.
+        let rx = Arc::new(Mutex::new(rx));
 
-                        // Invalid incoming message
-                        } else {
-                            error!("Failed to parse message from {}", src);
+        // Spawn the task that continuously reads from the UDP socket
+        // and enqueues incoming messages.
+        task::spawn({
+            let tx = tx.clone();
+            async move {
+                let mut buffer = [0u8; MAX_MESSAGE_SIZE];
+                loop {
+                    match socket.recv_from(&mut buffer).await {
+                        Ok((size, src)) => {
+                            let data = buffer[..size].to_vec();
+                            if let Err(e) = tx.send((data, src)).await {
+                                error!("Failed to enqueue incoming message: {}", e);
+                            }
                         }
-                    }
-                    // Reading from the socket failed
-                    Err(e) => {
-                        // bp here
-                        error!("Error receiving message: {}", e);
+                        Err(e) => {
+                            error!("Error receiving message: {}", e);
+                        }
                     }
                 }
             }
         });
+
+        // Spawn worker tasks to process messages from the queue.
+        for _ in 0..RECEIVE_WORKER_TASK_COUNT {
+            let rx = Arc::clone(&rx);
+            let routing_table = Arc::clone(&routing_table);
+            let request_map = request_map.clone();
+            let message_dispatcher = Arc::clone(&message_dispatcher);
+            let shard_storage_manager = Arc::clone(&shard_storage_manager);
+            let this_node_info = this_node_info.clone();
+            let node_clone = node_clone.clone();
+
+            task::spawn(async move {
+                loop {
+                    // Lock the receiver to get the next message.
+                    let msg_opt = {
+                        let mut rx_guard = rx.lock().await;
+                        rx_guard.recv().await
+                    };
+
+                    // If the channel is closed, exit the worker.
+                    let (data, src) = match msg_opt {
+                        Some(msg) => msg,
+                        None => break,
+                    };
+
+                    // Process the message.
+                    // Try to deserialize as a Response.
+                    if let Ok(response) = serde_json::from_slice::<Response>(&data) {
+                        request_map.handle_response(response).await;
+                    }
+                    // Try to deserialize as a Request.
+                    else if let Ok(request) = serde_json::from_slice::<Request>(&data) {
+                        handle_received_request(
+                            node_clone.clone(),
+                            this_node_info.clone(),
+                            request,
+                            Arc::clone(&routing_table),
+                            Arc::clone(&message_dispatcher),
+                            Arc::clone(&shard_storage_manager),
+                        )
+                        .await;
+                    }
+                    // Log an error if the message cannot be parsed.
+                    else {
+                        error!("Failed to parse message from {}", src);
+                    }
+                }
+            });
+        }
     }
 
     ///
@@ -210,7 +241,7 @@ impl Node {
         let request = Request::new(RequestType::Ping, self.to_node_info(), receiver_info);
 
         // Just call the send_request_and_wait method, it will return err if the request fails
-        self.send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+        self.send_request_and_wait(request, BASIC_REQUEST_TIMEOUT_MILLISECONDS)
             .await
     }
 
@@ -250,6 +281,7 @@ impl Node {
         // In case we are the second node in the network, the response only contains us. Therefore,
         // we should remove ourselves from the initial_k_closest list to prevent storing ourselves
         // in the routing table (As we would be sending message to ourselves)
+        // The lookup will not be performed if we are the second node in the network.
         initial_k_closest.retain(|node| *node != self.to_node_info());
 
         // Inject the initial resolvers into the result buffer
@@ -259,6 +291,8 @@ impl Node {
         loop {
             // Get the resolvers for the next round
             let resolvers = lookup_buffer.get_alpha_unqueried_nodes();
+            // This will happen if we are the second node in the network or if we exhausted all
+            // the unqueried nodes.
             if resolvers.is_empty() {
                 break;
             }
@@ -488,11 +522,11 @@ impl Node {
             .add_request(request.request_id, sender)
             .await;
 
-        // Send message
-        self.message_dispatcher
-            .send_request(request)
-            .await
-            .map_err(|_| NodeError::UnableToSend)?;
+        // Send message, remove the request from the map if it fails
+        if self.message_dispatcher.send_request(request).await.is_err() {
+            self.request_map.remove_request(&request_id).await;
+            return Err(NodeError::UnableToSend);
+        }
 
         // Await the response from the channel, with given timeout.
         match timeout(Duration::from_millis(timeout_milliseconds), receiver).await {
@@ -521,15 +555,31 @@ impl Node {
             .map(|node_with_port| self.send_chunk_over_tcp(node_with_port.clone(), chunk.clone()))
             .collect::<Vec<_>>();
 
-        let sent_to_nodes = join_all(established_connection).await;
+        let sent_results = join_all(established_connection).await;
 
-        if !sent_to_nodes.is_empty() {
+        // Partition results into successes and failures.
+        let (successes, failures): (Vec<_>, Vec<_>) =
+            sent_results.into_iter().partition(Result::is_ok);
+
+        // Log each failure.
+        failures.iter().for_each(|res| {
+            if let Err(err) = res {
+                warn!("Chunk replication upload to a node failed: {:?}", err);
+            }
+        });
+
+        if !successes.is_empty() {
+            if !failures.is_empty() {
+                warn!(
+            "Chunk upload: {} nodes failed while {} nodes succeeded. Note: this is fine, but the replication is not full.",
+            failures.len(),
+            successes.len()
+        );
+            }
             println!("Chunk successfully uploaded.");
             Ok(())
         } else {
-            // Future-improvement: Chunks which failed to upload to at least one node,
-            // might be sent again to a different set of nodes.
-            bail!("Chunk was not sent!");
+            bail!("Chunk was not sent to any node!")
         }
     }
 
@@ -627,7 +677,7 @@ impl Node {
         );
 
         match self
-            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS)
+            .send_request_and_wait(request, BASIC_REQUEST_TIMEOUT_MILLISECONDS)
             .await
         {
             Ok(response) => {
@@ -663,7 +713,7 @@ impl Node {
 
         // Just call the send_request_and_wait method, it will return err if the request fails
         match self
-            .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS) // FIXME Specify timeout
+            .send_request_and_wait(request, BASIC_REQUEST_TIMEOUT_MILLISECONDS)
             .await
         {
             // Ready to accept data
@@ -686,16 +736,15 @@ impl Node {
     ///
     async fn send_chunk_over_tcp(&self, response: Response, chunk: Chunk) -> Result<()> {
         if let ResponseType::PortOK { port } = response.response_type {
-            let tcp_address =
-                response.sender.address.ip().to_string() + ":" + port.to_string().as_str();
-            let mut stream = TcpStream::connect(tcp_address)
+            let tcp_address = format!("{}:{}", response.sender.address.ip(), port);
+            let mut stream = TcpStream::connect(&tcp_address)
                 .await
-                .expect("Unable to connect to the TCP Stream.");
+                .with_context(|| format!("Unable to connect to TCP stream at {}", tcp_address))?;
 
             stream
-                .write_all(chunk.data.as_slice())
+                .write_all(&chunk.data)
                 .await
-                .expect("Unable to write data.");
+                .with_context(|| format!("Unable to write chunk data to {}", tcp_address))?;
 
             Ok(())
         } else {
@@ -859,16 +908,36 @@ impl Node {
             // Get the responses from all resolvers in this round
             current_responses = self.lookup_round(target, resolvers, true).await;
 
-            // Record responses. If we didn't get any closer results, quit the rounds loop
+            // Record responses. If we didn't get any closer results OR we found the value, quit
+            // this loop
             if !lookup_buffer.record_lookup_round_responses(current_responses.clone(), true) {
                 break;
             }
-
-            // FIXME this doesn't exhaust all K closest nodes to the value (see find_node)
         }
 
-        // Check if we found the _chunk storer
+        // Check if we found the chunk storer
         if let Some(lookup_response) = current_responses
+            .into_iter()
+            .find(|response| matches!(response.get_success_type(), Some(LookupSuccessType::Value)))
+        {
+            let storer = lookup_response.get_resolver();
+            info!("Found a node which stores chunk {}: {}", target, storer.id);
+            return Ok(storer); // Finish early without exhaustive lookup
+        }
+
+        // If we didn't find the storer from the lookup rounds above, there is still possibility
+        // that we didn't exhaust all the K closest nodes in the lookup buffer. Therefore, we
+        // should try to resolve the storer from remaining unqueried nodes in the K closest we
+        // have found so far.
+        let remaining_resolvers = lookup_buffer.get_unqueried_resulting_nodes();
+        // If we have exhausted all the K closest nodes, we can be sure that the chunk is not
+        // stored in the network.
+        if remaining_resolvers.is_empty() {
+            bail!("Failed to find storer for chunk {}.", target);
+        }
+        // Finish up with the last lookup round
+        let remaining_responses = self.lookup_round(target, remaining_resolvers, true).await;
+        if let Some(lookup_response) = remaining_responses
             .into_iter()
             .find(|response| matches!(response.get_success_type(), Some(LookupSuccessType::Value)))
         {
@@ -877,6 +946,7 @@ impl Node {
             return Ok(storer);
         }
 
+        // We are sure the chunk is not stored in the network.
         bail!("Failed to find storer for chunk {}.", target);
     }
 

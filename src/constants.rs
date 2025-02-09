@@ -30,5 +30,8 @@ pub const DEFAULT_CHUNK_REUPLOAD_INTERVAL_S: u64 = 3600; // 1 h
 pub const DEFAULT_CHUNK_EXPIRE_TIME_S: u64 = 86400; // 24 h
 
 pub const LOOKUP_TIMEOUT_MILLISECONDS: u64 = 2500;
-pub const PING_TIMEOUT_MILLISECONDS: u64 = 1000;
+pub const BASIC_REQUEST_TIMEOUT_MILLISECONDS: u64 = 1000;
 pub const TCP_TIMEOUT_MILLISECONDS: u64 = 5000;
+
+/// Number of worker tasks for handling incoming requests.
+pub const RECEIVE_WORKER_TASK_COUNT: u32 = 4;
