@@ -1,16 +1,108 @@
-# How to run
+# P2P Filesystem
+This project is an implementation of P2P filesystem using Kademlia.
 
-1) Start the initial beacon node:
+**Contents**:
+
+- [How to configure](#How-to-configure) 
+- [How to run](#How-to-run)
+- [How to use](#How-to-use-the-network)
+
+- [Theory](#Theory)
+
+
+
+## How to configure
+This project can be configured using two config files, `config.yaml` and `config_beacon.yaml`. 
+
+### Config_beacon.yaml
+This file is a configuration file for a beacon node. Beacon node is a special type of node, which is the first one in the network and upon connectin does not go through joining procedure. User can specify several parameters.
+
+- **node_port**: User can specify a port on which the application is running on. If no port is provided, the applicationdoes use an unused port.
+- **cache_file_path**: Default path where cache is stored for a node.
+- **storage_path**: Default path where uploaded data is stored.
+- **ip_address_type**: Does specify a type of IP address. Possible fields are *[loopback, public, local]*.
+
+### Config.yaml
+This file is a configuration file for basic node. User can specify same parameters as in `config_beacon.yaml`, but there are two more parameters, which must be filled.
+
+- **beacon_node_address**: Ip address of the beacon node (node cannot join the network without it) in format *127.0.0.1:8081*.
+- **beacon_node_key**: Unique NodeID of the beacon node. This must be K bytes. 
+
+
+## How to run
+
+### 1.  Start the initial beacon node:
+After the project is configured, network should be ready. First of all the **Beacon Node** must join the network. This step is vital in order to allow other nodes to join as well.
 
 ```cargo run -- --config config_beacon.yaml --skip-join ```
 
-2) Update the config.yaml with the beacon node's address and key
+> NOTE: You can alternatively add `-v` flag in order to see all important messages from the network communication.  
 
+Expected output is: 
+```
+──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────
+Welcome to the network! Your node is 6eb76770415ac55f7ec5ccf52c91047d39ed38f4 @ 127.0.0.1:8081
+Available commands:
+ - ping <key>: Send a PING request to the specified node
+ - find_node <key>: Resolves 20 closest nodes to <key>
+ - upload <filepath>: Upload a file to the network
+ - download <file_handle> <storage_dir>: Download a file from the network
+ - dump_rt: Display the contents of the routing table
+ - dump_chunks: Display the chunks owned by this node
+ - Note: <key> should be a 40-character hexadecimal string
+──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────
+```
 
-3) Connect as many other nodes as you want:
+### 2. Update the config.yaml 
+As described in the [How to configure](#How-to-configure) section, user must update the `config.yaml` file with the beacon node's address and key.
+
+```
+beacon_node_address: "127.0.0.1:8081"
+beacon_node_key: "6eb76770415ac55f7ec5ccf52c91047d39ed38f4"
+# node_port: 8081
+cache_file_path: "cache.json"
+storage_path: "./storage-node01"
+ip_address_type: "loopback" # "public" or "loopback" or "local"
+
+```
+
+### 3. Connect other nodes
+After the configuration is updated, user can add as many nodes as he wants. Basic nodes can join the network using following command. 
 
 ```cargo run -- --config config.yaml ```
 
+> NOTE: You can alternatively add `-v` flag in order to see all important messages from the network communication.  
+
+> If you want to run multiple nodes from one machine please make sure that you update port and the cache and storage path for each of them.
+
+## How to use the network
+If the network is running and there are nodes connected to it, user can execute some commands. Commands can be executed from all nodes via CLI.
+
+#### Available commands:
+| Command | Parameters | Description |
+| ------ | ------ | ------ |
+|    **PING**    |    `key`: 40-character hexadecimal string    |    Send a PING request to the specified node    |
+|    **FIND_NODE**    |    `key`: 40-character hexadecimal string    |    Resolves 20 closest nodes to the `key`.     |
+|    **UPLOAD**    |    `filepath`: valid path to file as string    |    Upload a file to the network    |
+|    **DOWNLOAD**    |    `file_handle`: file handle identifier as string, `storage_dir`: valid path to a directory     |    Download a file from the network    |
+|    **DUMP_RT**    |   --     |    Display the contents of the routing table    |
+|    **DUMP_CHUNKS**    |   --     |    Display the chunks owned by this node    |
+
+#### Usage
+Each command should be used like this:
+```command [params]```
+
+Response will be displayed directly on the terminal window.
+
+**Example command**:  
+ ```upload file.txt```
+
+**Example response**:
+```Chunk successfully uploaded.
+File uploaded successfully!
+File handle: 080000000000000066696c652e74787420000000000000004871bda4d11162045726934d9324c2ab61bf0986fe21d48df2a84993fbc2d54201000000000000002800000000000000346462336534633566393039613965393066623866663434306563353639383263326265313536640c0000000000000097ca18e214ecf47a7f2581a1
+──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────
+```
 ___
 ___
 
