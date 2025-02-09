@@ -22,7 +22,7 @@ This file is a configuration file for basic node. User can specify same paramete
 ## How to run
 
 ### 1.  Start the initial beacon node:
-After the project is configured, network should be ready. First of all the **Beacon Node** must join the network. This step is vital in order to allow other nodes to join as well.
+After the project is configured, network should be ready. First of all the **Beacon Node** must join the network. This step is vital in order to allow other nodes to join as well. In order to connect the Beacon Node, `--skip-join` flag is used. This means that the node does not try to fill its routing table by contacting other nodes. This flag should be omitted for all other nodes. 
 
 ```cargo run -- --config config_beacon.yaml --skip-join ```
 
@@ -44,7 +44,7 @@ Available commands:
 ```
 
 ### 2. Update the config.yaml 
-As described in the [How to configure](#How-to-configure) section, user must update the `config.yaml` file with the beacon node's address and key.
+As described in the [How to configure](#how-to-configure) section, user must update the `config.yaml` file with the beacon node's address and key.
 
 ```
 beacon_node_address: "127.0.0.1:8081"
