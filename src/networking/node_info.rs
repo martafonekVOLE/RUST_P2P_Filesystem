@@ -3,20 +3,23 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::net::SocketAddr;
 
+///
+/// NodeInfo struct contains `Key` and `SocketAddr` of a node in the network. This is used as a contact
+/// for the node.
+///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct NodeInfo {
-    pub id: Key,
-    pub address: SocketAddr,
+    pub(crate) id: Key,
+    pub(crate) address: SocketAddr,
 }
 
 impl NodeInfo {
+    ///
+    /// Default constructor.
+    ///
     pub fn new(id: Key, address: SocketAddr) -> Self {
         NodeInfo { id, address }
     }
-
-    pub fn get_id(&self) -> Key {
-        self.id
-    } // TODO Change all usages to direct id access
 }
 
 impl Display for NodeInfo {
