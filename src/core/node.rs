@@ -523,7 +523,7 @@ impl Node {
 
         let sent_to_nodes = join_all(established_connection).await;
 
-        if sent_to_nodes.len() > 0 {
+        if !sent_to_nodes.is_empty() {
             println!("Chunk successfully uploaded.");
             Ok(())
         } else {
@@ -597,7 +597,7 @@ impl Node {
         let responsive_nodes = join_all(nodes_with_ports)
             .await
             .into_iter()
-            .filter_map(|res| res)
+            .flatten()
             .collect::<Vec<Response>>();
 
         if responsive_nodes.is_empty() {
