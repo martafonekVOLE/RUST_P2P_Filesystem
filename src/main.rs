@@ -183,6 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" - download <file_handle> <storage_dir>: Download a file from the network");
     println!(" - dump_rt: Display the contents of the routing table");
     println!(" - dump_chunks: Display the chunks owned by this node");
+    println!(" - download_from_handle_file <file> <storage_dir>: Download a file from the network using a file containing the file handle");
     println!(
         "NOTE: <key> should be a {}-character hexadecimal string",
         K * 2
@@ -244,6 +245,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => eprintln!("Invalid file handle: {}", e),
                 }
             }
+            "download_from_handle_file" if parts.len() == 3 => {
+                let handle_file_path = parts[1];
+                let output_dir = Path::new(parts[2]);
+                // Attempt to read the file that contains the file handle.
+                match std::fs::read_to_string(handle_file_path) {
+                    Ok(handle_str) => {
+                        // Remove any surrounding whitespace.
+                        let handle_str = handle_str.trim();
+                        // Parse the file handle string into a FileMetadata instance.
+                        match FileMetadata::from_str(handle_str) {
+                            Ok(file_metadata) => {
+                                // Attempt to download the file into the provided output directory.
+                                match node.download_file(file_metadata, output_dir).await {
+                                    Ok(file) => println!(
+                                        "File downloaded successfully! Saved to {:?}",
+                                        file
+                                    ),
+                                    Err(e) => eprintln!("Failed to download file: {}", e),
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Invalid file handle in '{}': {}", handle_file_path, e)
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to read handle file '{}': {}", handle_file_path, e),
+                }
+            }
             "dump_rt" if parts.len() == 1 => {
                 let all_contacts = node.get_routing_table_content().await;
                 println!("Routing table content:");
@@ -260,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {
                 eprintln!(
-                    "Wrong command or syntax '{}'. Valid commands are: 'dump_rt', 'find_node <key>', 'ping <key>', 'upload <filepath>', 'download <file_handle> <storage_dir>' or 'dump_chunks'",
+                    "Wrong command or syntax '{}'. Valid commands are: 'dump_rt', 'find_node <key>', 'ping <key>', 'upload <filepath>', 'download <file_handle> <storage_dir>', 'download_from_handle_file <file> <storage_dir>' or 'dump_chunks' ",
                     parts[0]
                 );
             }

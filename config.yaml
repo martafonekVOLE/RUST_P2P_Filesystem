@@ -1,8 +1,8 @@
 # beacon variables can be omitted if running with --skip-join flag
 beacon_node_address: "127.0.0.1:8081"
-beacon_node_key:  # Must be K bytes, (K*2 hex characters)
+beacon_node_key: bdcb66f549ae27bcf0d0649350e9db2a84d75b74 # Must be K bytes, (K*2 hex characters)
 # explicit node port can be omitted, in that case an ephemeral port will be used
 # node_port: 8081
 cache_file_path: "cache.json"
-storage_path: "./storage-node01"
+storage_path: "./storage-node01" # Mandatory, but can be overridden by automatic dir creation via --automatic-storage flag.
 ip_address_type: "loopback" # "public" or "loopback" or "local"

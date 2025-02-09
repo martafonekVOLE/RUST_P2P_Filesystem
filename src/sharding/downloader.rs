@@ -32,7 +32,9 @@ impl FileDownloader {
         })
     }
 
+    ///
     /// Decrypt and store the chunk.
+    ///
     pub async fn store_next_chunk_decrypt(&mut self, chunk: Chunk) -> Result<(), ShardingError> {
         // Check if chunk.data is empty
         if chunk.data.is_empty() {
@@ -62,7 +64,8 @@ impl FileDownloader {
 
         decrypted_chunk_bytes.truncate(padded_chunk_size);
 
-        // TODO: don't need to compare the hash because AUTH TAG already ensures integrity
+        // We might not need to compare the hash because AUTH TAG already ensures integrity.
+        // This is just an extra check.
         if chunk.hash != chunk_metadata.hash {
             return Err(ShardingError::ChunkHashMismatch);
         }

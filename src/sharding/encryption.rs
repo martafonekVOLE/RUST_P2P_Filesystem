@@ -4,7 +4,6 @@ use aes_gcm::{
 };
 use thiserror::Error;
 
-// Define custom error type
 #[derive(Error, Debug)]
 pub enum EncryptionError {
     #[error("Encryption error: {0}")]
@@ -13,10 +12,14 @@ pub enum EncryptionError {
 
 pub type Result<T> = std::result::Result<T, EncryptionError>;
 
+///
 /// Auth tag appended at the end of encrypted payload. Ensures integrity and authenticity.
+///
 pub const AES_GCM_AUTH_TAG_SIZE_B: usize = 16;
 
+///
 /// Encrypts data using AES-GCM.
+///
 pub fn encrypt_payload(payload: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let key = Key::<Aes256Gcm>::from_slice(key);
     let cipher = Aes256Gcm::new(key);
@@ -30,7 +33,9 @@ pub fn encrypt_payload(payload: &[u8], key: &[u8]) -> Result<(Vec<u8>, Vec<u8>)>
     Ok((nonce.to_vec(), encrypted_payload.to_vec())) // Store nonce + ciphertext
 }
 
+///
 /// Decrypts data using AES-GCM.
+///
 pub fn decrypt_payload(encrypted_payload: &Vec<u8>, key: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let nonce = Nonce::from_slice(nonce);
@@ -87,7 +92,7 @@ mod tests {
         assert!(result.is_err());
         // Attempt to decrypt with a wrong nonce
         let mut rng = rand::thread_rng();
-        let index = rng.gen_index(0..AES_GCM_NONCE_SIZE_B); // FIXME this constant is only used here, nowhere else in the actual code
+        let index = rng.gen_index(0..AES_GCM_NONCE_SIZE_B);
         let mut modified_nonce = nonce.to_vec();
         modified_nonce[index] ^= rng.random::<u8>();
         let result = decrypt_payload(&ciphertext, &wrong_key, &modified_nonce);

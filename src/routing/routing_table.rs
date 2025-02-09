@@ -111,27 +111,31 @@ impl RoutingTable {
 
         let bucket = &mut self.buckets[bucket_index_of_key];
         // Update last lookup time of k-bucket
-        // TODO: maybe find a better way to do this
+        // Maybe find a better way to do this...
         bucket.set_last_lookup_now();
         self.get_n_closest(key, n)
     }
 
+    ///
     /// Do not call this if you initiate the lookup (FIND_NODE/FIND_VALUE), call lookup_... instead
+    ///
+    /// Gets n closest nodes to the key
+    ///
+    /// ## Algorithm
+    /// ```Take all from bucket[i]
+    ///         If closest bucket (i) does not contain enough:
+    ///             Append all from bucket[i+1]
+    ///             Append all from bucket[i-down_i] until take as much as from bucket[i+1]
+    ///             sort all by distance, take only n
+    ///             // Guarrantees to get closest
+    ///             -> return
+    ///         else:
+    ///             // Faster but not all of them are closest,
+    ///             // cause buckets sort nodes based on proximity to current node, not to target node
+    ///             -> return
+    /// ```
     #[allow(unused_assignments)]
     fn get_n_closest(&self, key: &Key, n: usize) -> Result<Vec<NodeInfo>, RoutingTableError> {
-        /*!
-        Take all from bucket[i]
-        If closest bucket (i) does not contain enough:
-            Append all from bucket[i+1]
-            Append all from bucket[i-down_i] until take as much as from bucket[i+1]
-            sort all by distance, take only n
-            // Guarrantees to get closest
-            -> return
-        else:
-            // Faster but not all of them are closest,
-            // cause buckets sort nodes based on proximity to current node, not to target node
-            -> return
-        */
         let mut result = Vec::new();
         let bucket_index_of_key = self.get_bucket_index(key)?;
 
@@ -189,7 +193,9 @@ impl RoutingTable {
         Ok(result.into_iter().take(n).collect())
     }
 
+    ///
     /// Used for logging (dump_rt)
+    ///
     pub fn get_all_nodeinfos(&self) -> Vec<NodeInfo> {
         let mut all_nodes = Vec::new();
         for bucket in &self.buckets {
@@ -198,7 +204,9 @@ impl RoutingTable {
         all_nodes
     }
 
+    ///
     /// Generate random key (id) that is in range of bucket with provided index
+    ///
     fn get_random_id_for_bucket(&self, bucket_i: usize) -> Key {
         let mut key = Key::new_random();
         // Bucket index to leading zeroes
@@ -207,7 +215,9 @@ impl RoutingTable {
         key
     }
 
+    ///
     /// Returns random ids for each bucket that was not a target of lookup for certain amount of time
+    ///
     pub fn get_node_ids_for_refresh(&self) -> Vec<Key> {
         self.buckets
             .iter()
@@ -274,23 +284,27 @@ mod tests {
             }
         }
 
+        ///
         /// Fill all buckets with `num_nodes_per_bucket` nodeinfos with random keys.
+        ///
+        /// # Algorithm
+        ///
+        /// ```plaintext
+        /// For each bucket in reverse:
+        ///                 lz = increase num leading zeroes
+        ///                 populate bucket with random keys:
+        ///                     gen random key
+        ///                     set first lz bits to equal first lz bits of self.id
+        ///                     add node to bucket
+        /// ```
+        ///
         fn fill_buckets_random_uniform(&mut self, num_nodes_per_bucket: usize) {
-            /*!
-            for each bucket in reverse:
-                lz = increase num leading zeroes
-                populate bucket with random keys:
-                    gen random key
-                    set first lz bits to equal first lz bits of self.id
-                    add node to bucket
-
-            */
             for (lz, bucket) in self.buckets.iter_mut().rev().enumerate() {
                 for _ in 0..num_nodes_per_bucket {
                     let mut key = Key::new_random();
                     key.make_exactly_n_same_leading_bits_as(&self.id, lz);
                     let lz_true = self.id.leading_zeros_in_distance(&key);
-                    assert!(lz_true == lz);
+                    assert_eq!(lz_true, lz);
 
                     bucket
                         .add_nodeinfo_limited(NodeInfo::new_local(key))

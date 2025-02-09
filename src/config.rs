@@ -1,4 +1,5 @@
 use crate::core::key::Key;
+use anyhow::{anyhow, Context, Result};
 use get_if_addrs::get_if_addrs;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
@@ -48,18 +49,23 @@ pub struct Config {
 }
 
 impl Config {
+    ///
+    /// Reads the config from a YAML file.
+    ///
     /// - `file_path`: path to the config YAML
     /// - `skip_join`: if false, enforce that beacon_node_address and beacon_node_key are present
     /// - `port_arg`: an optional port argument from CLI (should override YAML if present)
+    ///
     pub fn parse_from_file(
         file_path: &str,
         skip_join: bool,
         port_arg: Option<u16>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self> {
         // Read YAML from file
         let file = std::fs::File::open(file_path)?;
         let reader = std::io::BufReader::new(file);
-        let mut config: Config = serde_yaml::from_reader(reader)?;
+        let mut config: Config = serde_yaml::from_reader(reader)
+            .with_context(|| format!("Failed to parse config file {}", file_path))?;
 
         // Validate paths
         config.validate_storage_path(&config.storage_path)?;
@@ -67,10 +73,10 @@ impl Config {
         // If skip_join is false, these must be present:
         if !skip_join {
             if config.beacon_node_address.is_none() {
-                return Err("beacon_node_address missing in config".into());
+                return Err(anyhow!("beacon_node_address missing in config"));
             }
             if config.beacon_node_key.is_none() {
-                return Err("beacon_node_key missing in config".into());
+                return Err(anyhow!("beacon_node_key missing in config"));
             }
         }
 
@@ -86,23 +92,21 @@ impl Config {
         Ok(config)
     }
 
-    fn validate_storage_path(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn validate_storage_path(&self, path: &str) -> Result<()> {
         let path = std::path::Path::new(path);
         if !path.exists() {
             std::fs::create_dir_all(path)?;
-        } else if !path.is_dir() {
-            return Err(format!("Storage path is not a directory: {}", path.display()).into());
         }
         Ok(())
     }
 
-    pub async fn resolve_ip_address(&self) -> Result<IpAddr, Box<dyn std::error::Error>> {
+    pub async fn resolve_ip_address(&self) -> Result<IpAddr> {
         match self.ip_address_type {
             IpAddressType::Public => {
                 if let Some(ip) = public_ip::addr().await {
                     Ok(ip)
                 } else {
-                    Err("Failed to get public IP address".into())
+                    Err(anyhow!("Failed to get public IP address"))
                 }
             }
             IpAddressType::Local => {
@@ -111,7 +115,7 @@ impl Config {
                     .into_iter()
                     .find(|iface| !iface.is_loopback() && iface.ip().is_ipv4())
                     .map(|iface| iface.ip())
-                    .ok_or("Failed to get local IP address")?;
+                    .ok_or_else(|| anyhow!("Failed to get local IP address"))?;
                 Ok(local_ip)
             }
             IpAddressType::Loopback => Ok(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
