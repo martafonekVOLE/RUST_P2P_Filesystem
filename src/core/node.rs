@@ -367,7 +367,7 @@ impl Node {
     /// a port.
     ///
     pub async fn upload_file(&self, file_path: &str) -> Result<FileMetadata> {
-        // Ccheck file existence
+        // Check file existence
         if !Path::new(file_path).exists() {
             bail!(
                 "Can't upload nonexistent file '{}'. Did you enter the correct path?",
@@ -375,7 +375,7 @@ impl Node {
             );
         }
 
-        // Call start sharding
+        // Start sharding
         let mut uploader = FileUploader::new(file_path).await?;
 
         // Loop over shards
@@ -395,27 +395,8 @@ impl Node {
                         .get_ports_for_nodes(responsible_nodes, chunk.clone().hash)
                         .await?;
 
-                    if ports.is_empty() {
-                        bail!("No port returned from nodes.");
-                    }
-
                     // Send data to each node over TCP
-                    let established_connection = ports
-                        .into_iter()
-                        .map(|node_with_port| {
-                            self.send_chunk_over_tcp(node_with_port.clone(), chunk.clone())
-                        })
-                        .collect::<Vec<_>>();
-
-                    let sent_to_nodes = join_all(established_connection).await;
-
-                    // Check if at least one result is Ok
-                    if sent_to_nodes.iter().any(|result| result.is_ok()) {
-                        info!("Chunk {} successfully uploaded.", chunk.hash);
-                    } else {
-                        // Future-improvement: Chunk may be sent again to different nodes.
-                        bail!("Chunk {} could not be sent!", chunk.hash);
-                    }
+                    self.store_chunk(ports.clone(), chunk.clone()).await?;
                 }
                 None => {
                     break;
@@ -530,8 +511,34 @@ impl Node {
     }
 
     ///
-    /// Performs a node lookup (similar to `find_node()`) and returns the closest `ALPHA` nodes to
-    /// the target key.
+    /// Method for actual data upload in parallel. This does
+    /// connect to all nodes, which previously responded with
+    /// ports, and does start an upload.
+    ///
+    async fn store_chunk(&self, ports: Vec<Response>, chunk: Chunk) -> Result<()> {
+        let established_connection = ports
+            .into_iter()
+            .map(|node_with_port| self.send_chunk_over_tcp(node_with_port.clone(), chunk.clone()))
+            .collect::<Vec<_>>();
+
+        let sent_to_nodes = join_all(established_connection).await;
+
+        if sent_to_nodes.len() > 0 {
+            println!("Chunk successfully uploaded.");
+            Ok(())
+        } else {
+            // Future-improvement: Chunks which failed to upload to at least one node,
+            // might be sent again to a different set of nodes.
+            bail!("Chunk was not sent!");
+        }
+    }
+
+    ///
+    /// Determines which responsive nodes are responsible for a
+    /// chunk and does return ALPHA closest of them. The distance
+    /// is calculated using the XOR metric.
+    ///
+    /// Performs a node lookup (similar to `find_node()`).
     ///
     async fn resolve_alpha_closest_nodes_to_key(&self, chunk_id: Key) -> Result<Vec<Response>> {
         let closest_nodes = self
@@ -544,24 +551,24 @@ impl Node {
             .map(|closest_node| self.send_initial_store_request(closest_node, chunk_id))
             .collect::<Vec<_>>();
 
-        let mut responsive_nodes = join_all(store_request_futures).await;
+        let mut responsive_nodes = join_all(store_request_futures)
+            .await
+            .into_iter()
+            .filter_map(|res| res)
+            .collect::<Vec<Response>>();
 
         if responsive_nodes.is_empty() {
             bail!("Unable to store file. No responsive nodes.");
         }
 
         responsive_nodes.sort_by(|a, b| {
-            // Unwrap can be used here, because get_responsive_nodes_round does return
-            // only valid responses as Some(response)
-            let dist_a = a.clone().unwrap().sender.id.distance(&chunk_id);
-            let dist_b = b.clone().unwrap().sender.id.distance(&chunk_id);
+            let dist_a = a.clone().sender.id.distance(&chunk_id);
+            let dist_b = b.clone().sender.id.distance(&chunk_id);
             dist_a.cmp(&dist_b)
         });
 
-        // take ALPHA nodes where XOR distance is the smallest
-        let alpha_nodes = responsive_nodes.into_iter().flatten().take(ALPHA).collect();
-
-        Ok(alpha_nodes)
+        // take ALPHA nodes with the smallest distance
+        Ok(responsive_nodes)
     }
 
     ///
@@ -587,15 +594,18 @@ impl Node {
             .collect::<Vec<_>>();
 
         // Nodes that are ready to accept TCP data transfer
-        let responsive_nodes = join_all(nodes_with_ports).await;
+        let responsive_nodes = join_all(nodes_with_ports)
+            .await
+            .into_iter()
+            .filter_map(|res| res)
+            .collect::<Vec<Response>>();
 
         if responsive_nodes.is_empty() {
             bail!("Unable to store file. No nodes are ready to accept TCP data transfer.");
         }
 
         // take ALPHA nodes which XOR distance it the smallest
-        let flatten = responsive_nodes.into_iter().flatten().collect();
-        Ok(flatten)
+        Ok(responsive_nodes)
     }
 
     ///
@@ -656,14 +666,17 @@ impl Node {
             .send_request_and_wait(request, PING_TIMEOUT_MILLISECONDS) // FIXME Specify timeout
             .await
         {
+            // Ready to accept data
             Ok(response) if response.response_type == ResponseType::StoreOK => {
                 info!("Node '{}' is ready to accept data.", response.sender.id);
                 Some(response)
             }
+            // Updated storage, unable to accept
             Ok(response) if response.response_type == ResponseType::StoreChunkUpdated => {
                 info!("Node '{}' updated the data.", response.sender.id);
                 None
             }
+            // Timed out or unable to accept
             _ => None,
         }
     }
