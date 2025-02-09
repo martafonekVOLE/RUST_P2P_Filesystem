@@ -7,7 +7,7 @@ This project can be configured using two config files, `config.yaml` and `config
 ### Config_beacon.yaml
 This file is a configuration file for a beacon node. Beacon node is a special type of node, which is the first one in the network and upon connectin does not go through joining procedure. User can specify several parameters.
 
-- **node_port**: User can specify a port on which the application is running on. If no port is provided, the applicationdoes use an unused port.
+- **node_port**: User can specify a port on which the application is running on. If no port is provided, the application queries OS for any available port.
 - **cache_file_path**: Default path where cache is stored for a node.
 - **storage_path**: Default path where uploaded data is stored.
 - **ip_address_type**: Does specify a type of IP address. Possible fields are *[loopback, public, local]*.

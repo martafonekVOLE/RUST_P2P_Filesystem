@@ -189,7 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("──────────────────────────────── ✧ ✧ ✧ ────────────────────────────────");
 
-    // Replace the synchronous stdin loop with an asynchronous one.
+    // Accept user commands.
     let stdin = BufReader::new(io::stdin());
     let mut lines = stdin.lines();
 
@@ -199,7 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        match parts[0] {
+        match parts[0].to_lowercase().as_str() {
             "ping" if parts.len() == 2 => match Key::from_hex_str(parts[1]) {
                 Ok(node_id) => match node.ping(node_id).await {
                     Ok(response) => println!("{} responded to PING: {}", parts[1], response),
