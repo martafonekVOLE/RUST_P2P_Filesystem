@@ -8,7 +8,9 @@ pub struct DataTransfer {
     pub chunk_hash: Key,
 }
 
+///
 /// Keeps track of chunk transfer requests over TCP.
+///
 pub struct DataTransfersTable {
     transfers: HashMap<u16, DataTransfer>, // Maps port to sender info
 }

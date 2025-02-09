@@ -42,7 +42,9 @@ pub struct StoredChunkInfo {
     pub time_stored_at: Instant,
 }
 
-/// Manages stored chunks.
+///
+/// Manages stored chunks. Keeps the information about their expiration and
+///
 pub struct ShardStorageManager {
     storage_root_path: PathBuf,
     owned_chunks: HashMap<Hash, StoredChunkInfo>,
@@ -64,7 +66,9 @@ impl ShardStorageManager {
         }
     }
 
-    /// Save chunk received by TCP
+    ///
+    /// Save chunk received by TCP.
+    ///
     pub async fn store_chunk_for_known_peer(&mut self, data: Vec<u8>, port: u16) -> Result<()> {
         // Check if transfer was initiated on this port, to avoid accepting unwanted data.
         let data_transfer = self.data_transfers_table.get(port);
