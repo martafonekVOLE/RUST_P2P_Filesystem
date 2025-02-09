@@ -72,7 +72,7 @@ If the network is running and there are nodes connected to it, user can execute 
 | Command | Parameters | Description |
 | ------ | ------ | ------ |
 |    **PING**    |    `key`: 40-character hexadecimal string    |    Send a PING request to the specified node    |
-|    **FIND_NODE**    |    `key`: 40-character hexadecimal string    |    Resolves 20 closest nodes to the `key`.     |
+|    **FIND_NODE**    |    `key`: 40-character hexadecimal string    |    Resolves 20 closest nodes to the `key`     |
 |    **UPLOAD**    |    `filepath`: valid path to file as string    |    Upload a file to the network    |
 |    **DOWNLOAD**    |    `file_handle`: file handle identifier as string, `storage_dir`: valid path to a directory     |    Download a file from the network    |
 |    **DUMP_RT**    |   --     |    Display the contents of the routing table    |
