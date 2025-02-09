@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{config::Config, core::key::Key, networking::node_info::NodeInfo};
 
+///
+/// This is unfinished!
+///
+/// Cache should be used to dump the state of the node for a possible restarting the node with the
+/// same identity.
+///
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Cache {
     pub key: Key,
@@ -17,7 +23,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn parse_from_file(file_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let file = std::fs::File::open(file_path)?;
+        let file = File::open(file_path)?;
         let reader = std::io::BufReader::new(file);
         let cache: Cache = serde_json::from_reader(reader)?;
 

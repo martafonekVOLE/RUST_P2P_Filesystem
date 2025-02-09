@@ -8,7 +8,9 @@ pub struct StoredFileInfo {
     pub time_uploaded: SystemTime,
 }
 
-/// Keeps map of uploaded files to reupload them every fixed amount of time.
+///
+/// Keeps map of uploaded files to enable re-uploading them every fixed amount of time.
+///
 pub struct FileManager {
     uploaded_files: RwLock<HashMap<String, StoredFileInfo>>,
     reupload_interval_s: u64,
@@ -32,6 +34,10 @@ impl FileManager {
         FileManager::new_with_reupload_interval(DEFAULT_FILE_REUPLOAD_INTERVAL_S)
     }
 
+    ///
+    /// Add file to uploaded files map. This should be called when file is successfully
+    /// uploaded to the network.
+    ///
     pub async fn add_file_uploaded_entry(&self, full_file_path: &str) {
         let mut uploaded_files = self.uploaded_files.write().await;
         match uploaded_files.get_mut(full_file_path) {
@@ -47,7 +53,10 @@ impl FileManager {
         }
     }
 
-    /// Get files that need to be re-uploaded and remove them from map (TTL = 0)
+    ///
+    /// Get files that need to be re-uploaded and remove them from map (TTL = 0). Should be called
+    /// periodically to re-upload files if the user has specified so.
+    ///
     pub async fn get_files_for_reupload(&self) -> Vec<String> {
         let uploaded_files = self.uploaded_files.read().await;
         let reupload: Vec<String> = uploaded_files

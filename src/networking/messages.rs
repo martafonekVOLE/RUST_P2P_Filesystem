@@ -43,18 +43,18 @@ pub enum RequestType {
 pub enum ResponseType {
     /// Pong message is used as reply to incoming Ping message.
     Pong,
-    /// Nodes is a response type associated with FindNode request type. It does return a Vector of
+    /// `Nodes` is a response type associated with FindNode request type. It does return a Vector of
     /// nodes which are closer to the requested one.
     Nodes { nodes: Vec<NodeInfo> },
-    /// StoreChunkUpdated is a response type associated with Store request type. It does return an
+    /// `StoreChunkUpdated` is a response type associated with Store request type. It does return an
     /// information that requested chunk is already present.
     StoreChunkUpdated,
-    /// StoreOK is a response type associated with Store request type. It does return an information
+    /// `StoreOK` is a response type associated with Store request type. It does return an information
     /// that the sending node is available and ready to receive data.
     StoreOK,
-    /// PortOK is a response type associated with GetPort request type. It does return a port.
+    /// `PortOK` is a response type associated with GetPort request type. It does return a port.
     PortOK { port: u16 },
-    /// HasValue is a response type associated with GetValue request type. It does return an
+    /// `HasValue` is a response type associated with GetValue request type. It does return an
     /// information that sending node has the requested chunk and is able to send it.
     HasValue { chunk_id: Key },
 }

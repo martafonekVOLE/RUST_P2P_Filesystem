@@ -11,11 +11,9 @@ pub struct FileUploader {
     file_reader: TokioBufReader<TokioFile>,
     file_metadata: FileMetadata,
     encryption_key: Vec<u8>,
-    //chunk_size: usize,
 }
 
 impl FileUploader {
-    // For testing purposes
     async fn new_with_max_file_size(
         full_file_path: &str,
         max_file_size_mb: usize,
@@ -32,8 +30,6 @@ impl FileUploader {
             return Err(ShardingError::FileTooBig);
         }
 
-        //let chunk_size = Self::get_chunk_size_from_file_size(file_size);
-        //let chunk_size = CHUNK_READ_KB_LARGE;
         let encryption_key = encryption::generate_key();
         let current_file_md = FileMetadata {
             name: full_file_path
@@ -49,21 +45,12 @@ impl FileUploader {
             file_reader: TokioBufReader::new(file),
             file_metadata: current_file_md,
             encryption_key,
-            //chunk_size,
         })
     }
 
     pub async fn new(full_file_path: &str) -> Result<Self, ShardingError> {
         FileUploader::new_with_max_file_size(full_file_path, MAX_FILE_SIZE_MB).await
     }
-
-    // fn get_chunk_size_from_file_size(file_size: usize) -> usize {
-    //     if file_size < LARGE_FILE_THRESHOLD_MB * 1024 * 1024 {
-    //         CHUNK_READ_KB_SMALL * 1024
-    //     } else {
-    //         CHUNK_READ_KB_LARGE * 1024
-    //     }
-    // }
 
     pub async fn get_next_chunk_encrypt(&mut self) -> Result<Option<Chunk>, ShardingError> {
         let file = &mut self.file_reader;

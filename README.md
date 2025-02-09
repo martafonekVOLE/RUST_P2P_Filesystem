@@ -7,7 +7,7 @@ This project can be configured using two config files, `config.yaml` and `config
 ### Config_beacon.yaml
 This file is a configuration file for a beacon node. Beacon node is a special type of node, which is the first one in the network and upon connectin does not go through joining procedure. User can specify several parameters.
 
-- **node_port**: User can specify a port on which the application is running on. If no port is provided, the applicationdoes use an unused port.
+- **node_port**: User can specify a port on which the application is running on. If no port is provided, the application queries OS for any available port.
 - **cache_file_path**: Default path where cache is stored for a node.
 - **storage_path**: Default path where uploaded data is stored.
 - **ip_address_type**: Does specify a type of IP address. Possible fields are *[loopback, public, local]*.
@@ -37,6 +37,7 @@ Available commands:
  - find_node <key>: Resolves 20 closest nodes to <key>
  - upload <filepath>: Upload a file to the network
  - download <file_handle> <storage_dir>: Download a file from the network
+ - download_from_handle_file <file> <storage_dir>: Download a file from the network using a file containing the file handle
  - dump_rt: Display the contents of the routing table
  - dump_chunks: Display the chunks owned by this node
  - Note: <key> should be a 40-character hexadecimal string
@@ -88,6 +89,7 @@ If the network is running and there are nodes connected to it, user can execute 
 |    **FIND_NODE**    |    `key`: 40-character hexadecimal string    |    Resolves 20 closest nodes to the `key`     |
 |    **UPLOAD**    |    `filepath`: valid path to file as string    |    Upload a file to the network    |
 |    **DOWNLOAD**    |    `file_handle`: file handle identifier as string, `storage_dir`: valid path to a directory     |    Download a file from the network    |
+|    **DOWNLOAD_FROM_HANDLE_FILE**    |   `file`: valid path to file, `storage_dir`: valid path to a directory     |    Download a file from the network (for large handles)    |
 |    **DUMP_RT**    |   --     |    Display the contents of the routing table    |
 |    **DUMP_CHUNKS**    |   --     |    Display the chunks owned by this node    |
 

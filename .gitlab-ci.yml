@@ -34,6 +34,7 @@ lint:
   script:
     # Install clippy if it's not available
     - rustup component add clippy
+    - rustup component add rustfmt
     # Run clippy in a strict mode: fails if there are any warnings
     - cargo clippy -- -D warnings
     
