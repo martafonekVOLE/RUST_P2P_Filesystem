@@ -1,5 +1,6 @@
 # P2P Filesystem
 This project is an implementation of P2P filesystem using Kademlia.
+>NOTE: This repo is a fork of a University project me and other colleagues developed. Original is here: https://gitlab.fi.muni.cz/xkonopik/rust-p2p 
 
 ## How to configure
 This project can be configured using two config files, `config.yaml` and `config_beacon.yaml`. 
